@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Parametros de comportamento da missao (o "genoma" do robo).
+
+Este modulo concentra TODOS os ganhos e limiares que governam a exploracao,
+o desvio de obstaculos e a navegacao/posicionamento ate a bandeira. A ideia e
+que a logica de controle (maquina de estados) leia exclusivamente daqui, de
+forma que:
+
+  * Na entrega atual (Trabalho 1) os valores vem de config/mission_params.yaml
+    (parametros ROS 2), podendo ser ajustados sem recompilar.
+
+  * No segundo momento do projeto, um algoritmo de COMPUTACAO EVOLUTIVA podera
+    tratar o vetor de parametros como um cromossomo (genoma): basta usar
+    ``MissionParams.from_genome(...)`` / ``params.to_genome()`` e os limites em
+    ``MissionParams.GENOME_BOUNDS``. Nenhuma mudanca na maquina de estados sera
+    necessaria para evoluir o comportamento -- somente os valores mudam.
+
+Mantendo os parametros isolados do codigo de controle garantimos baixo
+acoplamento entre "o que o robo faz" (estados/comportamentos) e "como ele faz"
+(ganhos numericos), que e exatamente o ponto de injecao da evolucao.
+"""
+
+from dataclasses import dataclass, fields
+from typing import Dict, List, Tuple
+
+
+@dataclass
+class MissionParams:
+    """Conjunto de parametros sintonizaveis da missao.
+
+    Os defaults abaixo formam uma configuracao funcional "feita a mao" para a
+    arena padrao (arena_cilindros). O algoritmo evolutivo, no futuro, busca
+    valores melhores dentro de ``GENOME_BOUNDS``.
+    """
+
+    # ------------------------------------------------------------------ #
+    # Loop de controle
+    # ------------------------------------------------------------------ #
+    control_frequency: float = 20.0     # Hz do loop da maquina de estados
+    start_immediately: bool = True      # se False, comeca em AGUARDANDO_COMANDO
+
+    # ------------------------------------------------------------------ #
+    # Estado EXPLORANDO
+    # Movimento de varredura (serpentina) sobreposto a um avanco constante.
+    # ------------------------------------------------------------------ #
+    explore_linear_speed: float = 0.45        # m/s ao explorar
+    explore_serpentine_gain: float = 0.5      # rad/s amplitude da serpentina
+    explore_serpentine_period: float = 8.0    # s periodo da serpentina
+
+    # ------------------------------------------------------------------ #
+    # Desvio de obstaculos com LIDAR (ativo em EXPLORANDO e NAVEGANDO)
+    # ------------------------------------------------------------------ #
+    front_sector_half_angle_deg: float = 35.0   # meia-largura do setor frontal
+    side_sector_half_angle_deg: float = 70.0    # meia-largura dos setores laterais
+    obstacle_block_distance: float = 0.9         # m: dist. frontal que aciona desvio
+    emergency_stop_distance: float = 0.35        # m: dist. critica (para de avancar)
+    avoid_linear_speed: float = 0.12             # m/s durante o desvio
+    avoid_angular_speed: float = 1.0             # rad/s durante o desvio
+
+    # ------------------------------------------------------------------ #
+    # Estado NAVEGANDO_PARA_BANDEIRA
+    # Controle proporcional sobre o deslocamento horizontal da bandeira na
+    # imagem (offset normalizado em [-1, 1]).
+    # ------------------------------------------------------------------ #
+    nav_linear_speed: float = 0.4         # m/s ao navegar para a bandeira
+    nav_angular_kp: float = 1.6           # ganho P sobre o offset horizontal
+    nav_max_angular_speed: float = 1.2    # rad/s saturacao do giro
+
+    # ------------------------------------------------------------------ #
+    # Estado POSICIONANDO_PARA_COLETA
+    # ------------------------------------------------------------------ #
+    # Gatilho NAV -> POSICIONANDO: a bandeira aparece pequena/de lado na camera,
+    # entao usamos PRINCIPALMENTE a distancia frontal do LIDAR (approach_distance)
+    # quando a bandeira esta centralizada; a area (approach_area_ratio) e um
+    # gatilho secundario (caso o mastro fino escape do LIDAR).
+    approach_distance: float = 1.3        # m: dist. frontal p/ NAV->POSICIONANDO
+    approach_area_ratio: float = 0.015    # area (gatilho secundario NAV->POSICIONANDO)
+    # Conclusao do posicionamento: a bandeira "grande o suficiente" na imagem
+    # indica proximidade (sinal visual robusto, ao contrario do mastro fino no
+    # LIDAR). O LIDAR (emergency_stop_distance) entra apenas como seguranca.
+    complete_area_ratio: float = 0.03     # area p/ considerar POSICIONADO (perto)
+    target_stop_distance: float = 0.6     # m: dist. frontal de referencia/seguranca
+    position_linear_kp: float = 0.6       # ganho da velocidade de aproximacao
+    position_angular_kp: float = 2.0      # ganho P de centralizacao fina
+    centering_tolerance: float = 0.06     # offset normalizado considerado centrado
+
+    # ------------------------------------------------------------------ #
+    # Deteccao e transicoes da maquina de estados
+    # ------------------------------------------------------------------ #
+    detect_confirm_frames: int = 1        # frames p/ confirmar deteccao (1 = trava rapido)
+    detect_lost_timeout: float = 3.5      # s sem ver a bandeira -> REDETECTANDO
+    #   (tolera deteccao intermitente a longa distancia, evitando vai-e-vem)
+    redetect_spin_speed: float = 0.7      # rad/s ao girar procurando de novo
+    redetect_timeout: float = 8.0         # s sem reencontrar -> volta a EXPLORANDO
+
+    # ================================================================== #
+    # Suporte a COMPUTACAO EVOLUTIVA (fase 2)
+    # ------------------------------------------------------------------ #
+    # O subconjunto de parametros CONTINUOS evoluiveis e seus limites
+    # (min, max) ficam em _GENOME_BOUNDS (modulo). Campos booleanos/inteiros
+    # sao escolhas estruturais e ficam de fora do genoma continuo. A ordem do
+    # dicionario define a ordem do vetor de genoma.
+    # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Helpers de genoma
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def genome_keys(cls) -> List[str]:
+        """Nomes dos parametros evoluiveis, na ordem do vetor de genoma."""
+        return list(_GENOME_BOUNDS.keys())
+
+    @classmethod
+    def bounds(cls) -> List[Tuple[float, float]]:
+        """Limites (min, max) de cada gene, na mesma ordem de genome_keys()."""
+        return list(_GENOME_BOUNDS.values())
+
+    def to_genome(self) -> List[float]:
+        """Serializa os parametros evoluiveis num vetor (cromossomo)."""
+        return [float(getattr(self, k)) for k in self.genome_keys()]
+
+    @classmethod
+    def from_genome(cls, genome: List[float], base: "MissionParams" = None) -> "MissionParams":
+        """Constroi um MissionParams a partir de um vetor de genoma.
+
+        Campos nao presentes no genoma (bools/ints) sao herdados de ``base``
+        (ou dos defaults). Os valores sao limitados (clipados) aos bounds.
+        """
+        params = base if base is not None else cls()
+        keys = cls.genome_keys()
+        bounds = cls.bounds()
+        for value, key, (low, high) in zip(genome, keys, bounds):
+            setattr(params, key, float(min(max(value, low), high)))
+        return params
+
+    # ------------------------------------------------------------------ #
+    # Integracao com parametros ROS 2
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def declare_and_read(cls, node) -> "MissionParams":
+        """Declara cada campo como parametro ROS 2 no ``node`` (usando os
+        defaults da dataclass) e le os valores efetivos (que podem ter sido
+        sobrescritos por um arquivo YAML ou pela linha de comando). Retorna a
+        instancia preenchida.
+
+        E este o ponto que permite a um driver evolutivo, no futuro, lancar o
+        nodo com um arquivo de parametros diferente a cada episodio.
+        """
+        defaults = cls()
+        params = cls()
+        for f in fields(cls):
+            default_value = getattr(defaults, f.name)
+            node.declare_parameter(f.name, default_value)
+            value = node.get_parameter(f.name).value
+            setattr(params, f.name, value)
+        return params
+
+
+# Limites de evolucao definidos fora da dataclass para nao virarem "campos".
+_GENOME_BOUNDS: Dict[str, Tuple[float, float]] = {
+    # Exploracao
+    'explore_linear_speed':       (0.10, 0.80),
+    'explore_serpentine_gain':    (0.00, 1.20),
+    'explore_serpentine_period':  (3.00, 15.0),
+    # Desvio de obstaculos
+    'front_sector_half_angle_deg': (15.0, 60.0),
+    'obstacle_block_distance':    (0.50, 1.50),
+    'emergency_stop_distance':    (0.20, 0.60),
+    'avoid_linear_speed':         (0.00, 0.30),
+    'avoid_angular_speed':        (0.40, 1.80),
+    # Navegacao
+    'nav_linear_speed':           (0.10, 0.80),
+    'nav_angular_kp':             (0.50, 3.50),
+    'nav_max_angular_speed':      (0.60, 2.00),
+    # Posicionamento
+    'approach_distance':          (0.80, 2.00),
+    'approach_area_ratio':        (0.005, 0.10),
+    'complete_area_ratio':        (0.010, 0.20),
+    'target_stop_distance':       (0.40, 1.20),
+    'position_linear_kp':         (0.20, 1.50),
+    'position_angular_kp':        (0.80, 3.50),
+    # Re-deteccao
+    'redetect_spin_speed':        (0.30, 1.50),
+}

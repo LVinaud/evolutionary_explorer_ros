@@ -1,0 +1,18 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Gazebo / SDF gerado por xacro (mantemos os .sdf versionados que vieram do base)
+*.pyc
