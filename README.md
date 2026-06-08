@@ -1,319 +1,154 @@
 # evolutionary_explorer_ros
 
-**SSC0712 – Programação de Robôs Móveis · Trabalho 1**
-Sistema de **Exploração, Navegação e Controle da Missão** com ROS 2.
+## Visao geral
 
-Um robô diferencial autônomo **explora** a arena, **detecta a bandeira inimiga**
-por visão computacional (câmera de segmentação semântica), **navega** até ela
-**desviando de obstáculos** com o LIDAR e **se posiciona** de frente para a
-bandeira para a coleta. Todo o comportamento é coordenado por uma
-**máquina de estados**.
+Este pacote ROS 2 implementa o sistema de controle de um robo movel diferencial que explora um ambiente simulado, localiza a bandeira do time adversario por visao computacional, navega ate ela desviando de obstaculos com o sensor LIDAR e se posiciona de frente para ela para a coleta. Todo o comportamento e coordenado por uma maquina de estados, que e o modulo central do trabalho. O projeto foi desenvolvido para a disciplina SSC0712 Programacao de Robos Moveis do ICMC USP e utiliza ROS 2 Humble com o simulador Gazebo Fortress.
 
-> Este pacote deriva do pacote-base da disciplina
-> (`matheusbg8/prm_2026`): o robô, os sensores, os mundos e a infraestrutura de
-> *launch* foram reaproveitados e adaptados. **O pacote foi renomeado** para
-> `evolutionary_explorer_ros`, o robô para `explorer_robot`, e foram adicionados
-> os nós de percepção e de controle da missão.
+O pacote deriva do pacote base da disciplina, disponivel em github.com/matheusbg8/prm_2026. O robo, os sensores, os mundos e a infraestrutura de lancamento foram reaproveitados e adaptados. O pacote recebeu um nome proprio, o robo foi renomeado para explorer_robot e foram acrescentados os nos de percepcao e de controle da missao, alem de modificacoes de modelagem e estabilidade.
 
-> **Por que "evolutionary"?** A arquitetura foi projetada para uma **segunda
-> fase** em que os parâmetros de comportamento serão **evoluídos por computação
-> evolutiva**. Toda a lógica (máquina de estados) é independente dos *valores*
-> (ganhos/limiares), centralizados em [`config/mission_params.yaml`](config/mission_params.yaml)
-> e na dataclass [`MissionParams`](evolutionary_explorer_ros/mission_params.py).
-> Veja a seção [Preparação para computação evolutiva](#preparação-para-computação-evolutiva-fase-2).
+O nome do pacote contem a palavra evolutionary porque o projeto tem uma segunda fase planejada, na qual os parametros de comportamento do robo serao ajustados por computacao evolutiva. A arquitetura ja foi preparada para isso, mantendo toda a logica de decisao separada dos valores numericos de comportamento. Esses valores ficam reunidos em um unico arquivo de parametros e em uma classe de dados dedicada, de modo que evoluir o comportamento significa apenas trocar valores, sem alterar a maquina de estados.
 
----
+## Requisitos
 
-## 1. Requisitos
+O sistema foi feito para Ubuntu 22.04 com ROS 2 Humble e Gazebo Fortress na variante Ignition. As dependencias principais sao a biblioteca cliente rclpy, os pacotes de mensagens padrao do ROS, a ponte ros_gz_bridge, o ros_gz_sim, o ign_ros2_control, o ros2_control e os ros2_controllers, o robot_state_publisher, o xacro, o rviz2, o topic_tools, a biblioteca OpenCV com o cv_bridge, alem de numpy e scipy. Todas as dependencias estao declaradas no arquivo package.xml.
 
-- **Ubuntu 22.04**
-- **ROS 2 Humble**
-- **Gazebo Fortress** (Ignition) + `ros_gz` / `ign_ros2_control`
-- Python 3, OpenCV (`python3-opencv`), `cv_bridge`, `scipy`, `numpy`
+Caso o ROS 2 e o Gazebo ainda nao estejam instalados na maquina, o repositorio inclui um script auxiliar em scripts/install_ros_humble.sh que configura o repositorio de pacotes do ROS e instala tudo o que e necessario.
 
-Instalação das dependências do sistema (caso ainda não tenha o ROS/Gazebo,
-veja o script auxiliar [`scripts/install_ros_humble.sh`](scripts/install_ros_humble.sh)):
+## Instalacao das dependencias
 
-```bash
-# A partir da raiz do workspace, com o ROS já instalado:
+Com o ROS 2 ja instalado, as dependencias do pacote podem ser resolvidas pelo rosdep a partir da raiz do workspace. Os comandos a seguir assumem um workspace chamado ros2_ws na pasta do usuario.
+
+```
 cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-## 2. Compilação
+## Compilacao
 
-```bash
-# Coloque este pacote em ~/ros2_ws/src/evolutionary_explorer_ros
+Coloque a pasta deste pacote dentro de ~/ros2_ws/src e compile o workspace com o colcon a partir da raiz do workspace. Em seguida atualize o ambiente do terminal.
+
+```
 cd ~/ros2_ws
 colcon build --symlink-install --packages-select evolutionary_explorer_ros
 source install/setup.bash
 ```
 
-## 3. Execução
+## Execucao
 
-São necessários **dois terminais** (em ambos, lembre de `source install/setup.bash`).
+A execucao usa dois terminais. Em ambos e necessario carregar o ambiente do ROS e o ambiente do workspace antes de qualquer comando. As linhas de source aparecem no inicio de cada bloco abaixo.
 
-**Terminal 1 — inicia o mundo no Gazebo:**
+No primeiro terminal inicie o mundo no Gazebo. Esse comando carrega a arena padrao com as duas bandeiras, as bases, as paredes e os obstaculos cilindricos.
 
-```bash
+```
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py
-# (opcional) outro mundo:
-ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py world:=arena_paredes.sdf
 ```
 
-**Terminal 2 — carrega o robô + controle autônomo da missão:**
+No segundo terminal, depois que a arena terminar de abrir, carregue o robo e o controle autonomo da missao. Esse comando coloca o robo no mundo, sobe os sensores, estabelece a ponte entre o Gazebo e o ROS, abre o RViz, publica a odometria de referencia e inicia os nos de percepcao da bandeira e de controle da missao. O robo passa a explorar automaticamente.
 
-```bash
+```
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 ros2 launch evolutionary_explorer_ros missao.launch.py
 ```
 
-Isso sobe o robô, os sensores, a ponte Gazebo↔ROS, o RViz, a odometria
-*ground-truth*, o `flag_detector` (percepção) e o `mission_control`
-(máquina de estados). O robô começa a explorar imediatamente.
+O lancamento da missao aceita argumentos uteis. O argumento use_rviz com valor false desliga o RViz, o que e util para testes mais leves. Os argumentos spawn_x, spawn_y, spawn_z e spawn_yaw definem a posicao e a orientacao iniciais do robo. O argumento params_file permite carregar um arquivo de parametros diferente, recurso pensado para a fase de computacao evolutiva. O exemplo a seguir inicia o robo em uma posicao mais proxima da bandeira adversaria, o que permite observar a sequencia completa de deteccao, navegacao e posicionamento em pouco tempo.
 
-#### Argumentos úteis de launch
-
-```bash
-# Gazebo sem GUI (headless) — útil p/ testes e p/ episódios da fase evolutiva:
-ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py headless:=true
-
-# Missão sem RViz e com posição inicial do robô customizada:
-ros2 launch evolutionary_explorer_ros missao.launch.py use_rviz:=false \
-    spawn_x:=-8.0 spawn_y:=-0.5 spawn_yaw:=0.0
-
-# Usar outro arquivo de parâmetros (ex.: um genoma evoluído na fase 2):
-ros2 launch evolutionary_explorer_ros missao.launch.py params_file:=/caminho/genoma.yaml
+```
+ros2 launch evolutionary_explorer_ros missao.launch.py spawn_x:=3.0
 ```
 
-> **Validação:** em simulação (Gazebo Fortress, Humble) o sistema foi executado
-> de ponta a ponta, completando a missão (EXPLORANDO → … → POSICIONANDO →
-> MISSAO_CONCLUIDA), inclusive o caminho de recuperação REDETECTANDO_BANDEIRA
-> quando a bandeira sai do campo de visão.
+Para observar a troca de estados da maquina de estados durante a execucao, abra um terceiro terminal e acompanhe o topico de estado da missao.
 
-### Controle manual (alternativa, sem o controle autônomo)
+```
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 topic echo /mission/state
+```
 
-```bash
-# Terminal 1: inicia_simulacao.launch.py
-# Terminal 2: carrega_robo.launch.py   (só robô + sensores, sem a missão)
-# Terminal 3:
+Como alternativa ao controle autonomo, o robo tambem pode ser conduzido pelo teclado. Para isso, inicie o mundo no primeiro terminal, carregue apenas o robo e os sensores com o lancamento carrega_robo no segundo terminal e use o teleop no terceiro terminal.
+
+```
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-### Visualizar só o URDF (RViz, sem física)
+Tambem existe um lancamento chamado teste_urdf que abre apenas a descricao do robo no RViz, sem fisica, util para inspecionar a modelagem.
 
-```bash
-ros2 launch evolutionary_explorer_ros teste_urdf.launch.py
-```
+## Arquitetura geral do sistema
 
----
+O sistema e organizado em nos independentes que se comunicam por topicos. O simulador Gazebo publica os dados dos sensores em seu proprio sistema de topicos e a ponte ros_gz_bridge converte esses dados para topicos ROS. A partir dai, o no de percepcao processa a imagem da camera e o no de controle decide o que o robo deve fazer.
 
-## 4. Arquitetura geral do sistema
+O no mission_control e o cerebro do sistema. Ele implementa a maquina de estados, le os dados do LIDAR, da camera processada pela percepcao, da odometria e da unidade inercial, e publica comandos de velocidade no topico cmd_vel. Esses comandos sao redirecionados para o controlador de tracao diferencial do robo.
 
-```
-                 +------------------------+        /scan (LaserScan)
-   Gazebo  ----> |     ros_gz_bridge      | -----> /imu  (Imu)
-  Fortress       | (carrega_robo.launch)  | -----> /robot_cam/labels_map (Image)
-                 +------------------------+ -----> /model/explorer_robot/pose (Pose)
-                      |            |
-                      v            v
-        +--------------------+   +----------------------------+
-        |   flag_detector    |   |   ground_truth_odometry    |
-        | (camera segment.)  |   |  (/odom_gt + TF odom->base)|
-        +---------+----------+   +----------------------------+
-                  | /flag/detected (Bool)
-                  | /flag/offset   (Float32 [-1,1])
-                  | /flag/area_ratio (Float32)
-                  v
-        +-------------------------------+
-        |        mission_control        |  <-- /scan (desvio de obstáculos)
-        |   MÁQUINA DE ESTADOS (FSM)    |
-        +---------------+---------------+
-                        | /cmd_vel (Twist)
-                        v
-              diff_drive_controller  (ros2_control / Gazebo)
-```
+O no flag_detector e responsavel pela percepcao. Ele recebe a imagem da camera de segmentacao semantica e identifica a bandeira adversaria, publicando se a bandeira esta visivel, qual o deslocamento horizontal dela em relacao ao centro da imagem e qual a fracao da imagem que ela ocupa, que serve como medida de proximidade.
 
-### Nós
+O no ground_truth_odometry publica a odometria de referencia do robo e a transformacao entre os sistemas de coordenadas, a partir da pose fornecida pelo simulador. O no robo_mapper mantem um mapa de ocupacao simples e e opcional.
 
-| Nó | Arquivo | Função |
-|----|---------|--------|
-| `mission_control` | [`mission_control.py`](evolutionary_explorer_ros/mission_control.py) | **Cérebro**: máquina de estados, navegação reativa, desvio e posicionamento. Publica `/cmd_vel`. |
-| `flag_detector` | [`flag_detector.py`](evolutionary_explorer_ros/flag_detector.py) | **Percepção**: detecta a bandeira inimiga na câmera de segmentação e publica detecção/offset/área. |
-| `ground_truth_odometry` | [`ground_truth_odometry.py`](evolutionary_explorer_ros/ground_truth_odometry.py) | Publica `/odom_gt` e a TF `odom_gt → base_link` a partir da pose do simulador. |
-| `robo_mapper` | [`robo_mapper.py`](evolutionary_explorer_ros/robo_mapper.py) | Mapa de ocupação simples (`/grid_map`) — opcional. |
+Os principais topicos do sistema sao os seguintes. O topico cmd_vel transporta o comando de velocidade do controle para o robo. O topico scan transporta as leituras do LIDAR. O topico imu transporta os dados da unidade inercial. Os topicos sob robot_cam transportam os mapas da camera de segmentacao. O topico flag detectado, o topico de deslocamento e o topico de area transportam o resultado da percepcao da bandeira. O topico mission state publica o estado atual da maquina de estados. O topico mission start permite iniciar a missao caso o robo esteja configurado para aguardar comando.
 
-### Tópicos principais
+## Maquina de estados
 
-| Tópico | Tipo | Sentido |
-|--------|------|---------|
-| `/cmd_vel` | `geometry_msgs/Twist` | mission_control → robô |
-| `/scan` | `sensor_msgs/LaserScan` | LIDAR → mission_control |
-| `/imu` | `sensor_msgs/Imu` | IMU → mission_control |
-| `/robot_cam/labels_map` | `sensor_msgs/Image` | câmera segmentação → flag_detector |
-| `/robot_cam/colored_map` | `sensor_msgs/Image` | câmera segmentação (modo cor) |
-| `/flag/detected` | `std_msgs/Bool` | flag_detector → mission_control |
-| `/flag/offset` | `std_msgs/Float32` | desloc. horizontal normalizado `[-1,1]` |
-| `/flag/area_ratio` | `std_msgs/Float32` | área do blob / área da imagem |
-| `/flag/debug_image` | `sensor_msgs/Image` | detecção desenhada (depuração) |
-| `/mission/state` | `std_msgs/String` | estado atual da FSM (monitoramento) |
-| `/mission/start` | `std_msgs/Bool` | inicia a missão (se `start_immediately:=false`) |
+A maquina de estados e o modulo central e esta implementada no arquivo mission_control.py, com cada estado documentado no proprio codigo. Os estados sao os seguintes.
 
----
+No estado AGUARDANDO_COMANDO o robo permanece parado ate receber a ordem de inicio. Por padrao a missao comeca imediatamente, mas e possivel configurar o robo para esperar um comando externo.
 
-## 5. Máquina de estados (módulo central)
+No estado EXPLORANDO o robo varre o ambiente em busca da bandeira. O movimento combina uma atracao na direcao do lado adversario com uma repulsao em relacao aos obstaculos detectados pelo LIDAR, de forma que o robo avanca pela arena contornando os obstaculos. Quando a bandeira e confirmada pela percepcao, o robo passa ao estado seguinte.
 
-Implementada em [`mission_control.py`](evolutionary_explorer_ros/mission_control.py),
-com cada estado documentado no respectivo *handler*.
+No estado BANDEIRA_DETECTADA o robo registra que a bandeira foi identificada visualmente e estima a direcao dela em relacao a camera, usando o deslocamento horizontal e o campo de visao. Em seguida segue para a navegacao.
 
-```
- AGUARDANDO_COMANDO ──start──▶ EXPLORANDO ──bandeira confirmada──▶ BANDEIRA_DETECTADA
-                                  ▲   ▲                                    │
-                       timeout ───┘   │ bandeira perdida                   ▼
-                  REDETECTANDO_BANDEIRA ◀──────────── NAVEGANDO_PARA_BANDEIRA
-                                  │                            │ perto + centralizada
-                                  │ reencontrou                ▼
-                                  └──────────────▶  POSICIONANDO_PARA_COLETA
-                                                              │ alinhado + distância ok
-                                                              ▼
-                                                       MISSAO_CONCLUIDA
-```
+No estado NAVEGANDO_PARA_BANDEIRA o robo se dirige a bandeira por um controle proporcional sobre o deslocamento horizontal, mantendo a bandeira centralizada enquanto avanca. O desvio de obstaculos tem prioridade sobre a perseguicao, exceto quando o objeto a frente e a propria bandeira ja centralizada. Quando a bandeira fica suficientemente proxima e centralizada, o robo passa ao posicionamento.
 
-| Estado | Comportamento | Saída |
-|--------|---------------|-------|
-| **AGUARDANDO_COMANDO** | Parado até o *start*. | `start` → EXPLORANDO |
-| **EXPLORANDO** | Avança em **serpentina** (varredura) procurando a bandeira; **desvia** de obstáculos com o LIDAR. | bandeira confirmada → BANDEIRA_DETECTADA |
-| **BANDEIRA_DETECTADA** | Calcula o *bearing* da bandeira em relação à câmera (a partir do offset e do FOV). | → NAVEGANDO_PARA_BANDEIRA / (perdida) → REDETECTANDO |
-| **NAVEGANDO_PARA_BANDEIRA** | Controle **P** sobre o offset para se alinhar e avançar; **desvio de obstáculos tem prioridade** (mas o que está à frente quando a bandeira está centralizada é a *própria bandeira*, não um obstáculo a evitar). | perto (LIDAR/área) + centralizada → POSICIONANDO / perdida → REDETECTANDO |
-| **POSICIONANDO_PARA_COLETA** | Aproxima-se centralizando a bandeira até ela ficar **grande na imagem** (proximidade por visão — robusto, pois o mastro é fino no LIDAR); o LIDAR atua só como **segurança** anticolisão. | centralizado + bandeira grande (perto) → MISSAO_CONCLUIDA / perdida → REDETECTANDO |
-| **REDETECTANDO_BANDEIRA** | Gira no lugar (lado em que a bandeira foi vista) para reencontrá-la. | reencontrou → NAVEGANDO / timeout → EXPLORANDO |
-| **MISSAO_CONCLUIDA** | Para; breve giro de "comemoração". | — |
+No estado POSICIONANDO_PARA_COLETA o robo faz o ajuste fino. Ele se aproxima centralizando a bandeira ate que ela ocupe uma fracao suficiente da imagem, o que indica proximidade adequada. O LIDAR atua como seguranca para evitar colisao. Esse criterio baseado na area da imagem foi escolhido porque o mastro da bandeira e fino e a leitura direta de distancia pelo LIDAR sobre ele e pouco confiavel.
 
-**Robustez:** a perda da bandeira (REDETECTANDO) e o desvio reativo de
-obstáculos (prioridade sobre a perseguição) garantem reação correta a eventos,
-conforme o critério de *coerência e robustez*.
+No estado REDETECTANDO_BANDEIRA o robo trata a perda da bandeira do campo de visao. Ele gira no lugar, no sentido em que a bandeira foi vista por ultimo, para reencontra-la. Caso nao a reencontre dentro de um tempo limite, volta a explorar.
 
----
+No estado MISSAO_CONCLUIDA o robo para, tendo alcancado e se posicionado diante da bandeira adversaria. Um breve movimento de comemoracao e executado nos primeiros segundos.
 
-## 6. Detecção visual da bandeira
+A robustez do sistema aparece principalmente em dois pontos. O primeiro e o tratamento da perda da bandeira, que leva o robo a girar e reencontra-la em vez de prosseguir as cegas. O segundo e a prioridade do desvio de obstaculos sobre a perseguicao da bandeira, alem de uma deteccao de travamento que dispara uma manobra de escape quando o robo deixa de progredir.
 
-A câmera é do tipo **segmentação semântica** (definida no URDF). No mundo
-`arena_cilindros`, cada objeto recebe uma *label*:
+## Deteccao visual da bandeira
 
-| Objeto | label | Objeto | label |
-|--------|-------|--------|-------|
-| ground_plane | 5 | red_flag | **20** |
-| red_base | 10 | blue_flag | **25** |
-| blue_base | 15 | flag_deploy_zone | 28 |
-| obstáculos/centro | 30 | paredes | 35 |
+A camera do robo e do tipo segmentacao semantica, definida na descricao do robo. O simulador atribui a cada objeto da cena uma etiqueta numerica e publica um mapa de etiquetas no qual o valor de cada pixel corresponde a etiqueta do objeto naquele ponto. No mundo padrao, a bandeira adversaria, que e a azul, recebe a etiqueta de numero vinte e cinco, enquanto a bandeira do proprio time, a vermelha, recebe a etiqueta vinte. O robo nasce no lado vermelho, portanto a bandeira a ser capturada e a azul.
 
-O robô nasce no lado **vermelho**, então a **bandeira inimiga é a AZUL
-(label 25)** — esse é o `target_label` padrão do `flag_detector`.
+O no de percepcao le o mapa de etiquetas, isola os pixels cujo valor corresponde a etiqueta da bandeira adversaria, encontra o maior agrupamento desses pixels e calcula o centro e a area desse agrupamento. A partir do centro obtem o deslocamento horizontal normalizado da bandeira na imagem e a partir da area obtem uma medida de proximidade. Essa abordagem por etiqueta e mais robusta do que casar uma cor exata, porque nao depende de calibrar valores de cor. Ainda assim, o no oferece um modo alternativo de deteccao por cor, para quem preferir trabalhar com o mapa colorido da segmentacao.
 
-O `flag_detector` opera em dois modos (parâmetro `detection_mode`):
+## Navegacao e desvio de obstaculos
 
-- **`labels`** (padrão): lê `/robot_cam/labels_map`, onde o valor do pixel é o
-  ID da *label*. Procura `pixel == target_label`. **Robusto** (não depende de
-  calibrar cor).
-- **`color`**: lê `/robot_cam/colored_map` e procura uma cor BGR exata
-  (`target_color_*`) — abordagem das aulas. Use se preferir o mapa colorido,
-  calibrando a cor da bandeira (ver abaixo).
+As leituras do LIDAR sao agrupadas em setores que descrevem a distancia minima a frente, nas diagonais frontais e nas laterais. Esse agrupamento esta em um modulo auxiliar livre de dependencias do ROS, o que facilita testar a logica de forma isolada e reutiliza-la em um avaliador de desempenho sem simulacao grafica.
 
-Do maior *blob* encontrado calculamos o **centróide** → `offset` horizontal
-normalizado e a **área** (proxy de proximidade).
+Durante a exploracao, o robo se move por um esquema inspirado em campos potenciais. Existe uma componente que o atrai para a direcao do lado adversario e uma componente que o repele dos obstaculos proximos, somadas em um unico comando de giro. A velocidade de avanco diminui a medida que um obstaculo se aproxima e chega a zero em distancia critica, situacao na qual o robo apenas gira para se reorientar. Com isso, o robo tende a contornar os obstaculos em vez de avancar contra eles.
 
-### Calibração (se a detecção não funcionar de primeira)
+Durante a navegacao ate a bandeira, o desvio continua ativo, com a ressalva de que um objeto a frente, quando coincide com a bandeira ja centralizada, e tratado como o proprio alvo e nao como um obstaculo a evitar. O posicionamento final controla a aproximacao pela area da bandeira na imagem, parando a uma distancia adequada e com a bandeira centralizada.
 
-```bash
-# Veja as labels presentes na imagem (modo labels):
-ros2 topic echo /robot_cam/labels_map --no-arr
-# Veja a detecção desenhada:
-ros2 run rqt_image_view rqt_image_view   # selecione /flag/debug_image
-```
+## Modelagem do robo e sensores
 
-Ajuste `target_label` (ou, no modo `color`, `target_color_b/g/r`) em
-[`config/mission_params.yaml`](config/mission_params.yaml).
+A descricao do robo esta em description/robot.urdf.xacro, no formato Xacro. O robo e diferencial, com duas rodas motorizadas, um apoio frontal, uma camera de segmentacao, um LIDAR e uma unidade inercial. As transformacoes entre os sistemas de coordenadas sao publicadas pelo robot_state_publisher e pela odometria de referencia.
 
----
+As modificacoes feitas sobre o robo base incluem a renomeacao do robo, a correcao das referencias internas ao novo pacote e a adicao de um elemento de sinalizacao no topo, que serve como identificacao visual e demonstra a insercao de um novo link e de uma nova junta. Foram feitas tambem modificacoes voltadas a estabilidade, descritas na proxima secao.
 
-## 7. Navegação e desvio de obstáculos
+## Estabilidade do robo
 
-- O LIDAR (`/scan`, 360 amostras, alcance 0,12–3,5 m) é **setorizado**
-  (frente / frente-esq / frente-dir / laterais) em
-  [`navigation.py`](evolutionary_explorer_ros/navigation.py).
-- Se a distância frontal cai abaixo de `obstacle_block_distance`, o robô
-  **desvia** virando para o lado mais livre; abaixo de
-  `emergency_stop_distance`, ele **gira parado** (segurança).
-- O desvio é aplicado **tanto explorando quanto navegando** até a bandeira.
-  Durante a navegação, quando a bandeira está centralizada, o obstáculo à frente
-  é a própria bandeira — então o robô prossegue (em vez de desviar dela).
-- O **posicionamento final** se aproxima até a bandeira ficar grande na imagem
-  (`complete_area_ratio`), centralizando-a (`centering_tolerance`); o LIDAR
-  (`emergency_stop_distance`) é usado apenas como segurança anticolisão. Isso é
-  mais robusto que medir a distância do mastro fino com o LIDAR.
+Durante os testes em simulacao, o robo base mostrou tendencia a tombar para frente ao encostar nos obstaculos, devido ao centro de massa elevado e a um apoio frontal que prendia em curvas. Para corrigir isso, foram adotadas as seguintes medidas. Foi acrescentado um lastro de massa baixa proximo ao solo, o que abaixa bastante o centro de massa e deixa o robo estavel ao encostar em obstaculos. O apoio frontal passou a ter atrito praticamente nulo, para deslizar livremente nas curvas em vez de prender. As colisoes da garra, que e usada apenas na fase futura de coleta, foram removidas para que ela nao prenda no chao. As aceleracoes do controlador foram suavizadas. Por fim, a maquina de estados conta com uma salvaguarda que detecta inclinacao excessiva pela unidade inercial e interrompe os comandos nessa situacao.
 
----
+## Parametros e preparacao para a computacao evolutiva
 
-## 8. Preparação para computação evolutiva (fase 2)
+Todos os ganhos e limiares que governam o comportamento ficam reunidos no arquivo config/mission_params.yaml e espelhados na classe MissionParams, no arquivo mission_params.py. A maquina de estados le exclusivamente desses parametros, de modo que a logica de decisao fica separada dos valores numericos.
 
-A arquitetura separa **comportamento** (máquina de estados, em
-`mission_control.py`) de **parâmetros** (ganhos/limiares, em `MissionParams`).
-Isso é o ponto de injeção da evolução:
+Essa separacao e o ponto de injecao da computacao evolutiva planejada para a segunda fase. A classe de parametros oferece metodos para serializar o conjunto de valores como um vetor, que faz o papel de cromossomo, e para reconstruir os parametros a partir de um vetor, alem de fornecer os limites de cada valor evoluivel. O lancamento aceita um arquivo de parametros externo, o que permitira a um otimizador gerar um arquivo por individuo e executar um episodio de avaliacao para cada conjunto de parametros. Os topicos de estado da missao e de odometria servem como sinais para calcular o desempenho de cada individuo, por exemplo tempo ate alcancar a bandeira, distancia percorrida e ocorrencia de colisoes. Dessa forma, nenhuma alteracao na maquina de estados sera necessaria para evoluir o comportamento, apenas os valores mudam.
 
-- [`mission_params.py`](evolutionary_explorer_ros/mission_params.py) define a
-  dataclass **`MissionParams`** com todos os genes e:
-  - `to_genome()` / `from_genome(vetor)` — (de)serialização do **cromossomo**;
-  - `genome_keys()` / `bounds()` — ordem e **limites** de cada gene;
-  - `declare_and_read(node)` — declara os parâmetros como **parâmetros ROS 2**,
-    permitindo sobrescrevê-los por arquivo/CLI.
-- O launch aceita `params_file:=...`, então um **driver evolutivo** poderá, a
-  cada indivíduo, gerar um YAML de genoma e rodar um episódio:
+## Estrutura do pacote
 
-  ```bash
-  ros2 launch evolutionary_explorer_ros missao.launch.py params_file:=/tmp/individuo_42.yaml
-  ```
+O pacote segue a estrutura de um pacote Python do ROS 2. O arquivo package.xml descreve o pacote e suas dependencias. O arquivo setup.py define os pontos de entrada dos nos e a instalacao dos recursos. A pasta config contem os parametros da missao e a configuracao dos controladores. A pasta description contem a descricao do robo em Xacro. A pasta launch contem os arquivos de lancamento. A pasta world contem as arenas e a pasta models contem os obstaculos e demais modelos. A pasta rviz contem as configuracoes de visualizacao. A pasta com o mesmo nome do pacote contem os nos em Python e os modulos auxiliares, entre eles mission_control.py com a maquina de estados, flag_detector.py com a percepcao, navigation.py com as utilidades de LIDAR e navegacao, mission_params.py com os parametros, ground_truth_odometry.py com a odometria de referencia e robo_mapper.py com o mapeamento opcional. A pasta test contem os testes, incluindo testes do modulo de navegacao e dos parametros.
 
-- `navigation.py` é **livre de ROS**, podendo ser reutilizado num avaliador de
-  *fitness* headless.
-- `/mission/state` e `/odom_gt` servem como sinais para a **função de fitness**
-  (ex.: tempo até a bandeira, distância percorrida, colisões, cobertura).
+## Estado atual e limitacoes conhecidas
 
-Assim, **nenhuma mudança na máquina de estados** será necessária para evoluir o
-comportamento — apenas os valores dos parâmetros mudam.
+O robo nao tomba mais ao encostar em obstaculos e a missao completa, da deteccao ao posicionamento, funciona de forma confiavel quando o robo parte de uma regiao com espaco livre. A travessia desde a base, atravessando o aglomerado denso de cilindros que fica logo a frente, ainda nao e confiavel, pois a navegacao reativa por vezes prende o robo nesse aglomerado. Melhorar essa travessia em ambientes densos e justamente um dos objetivos da fase de computacao evolutiva, na qual os parametros de exploracao e de desvio serao ajustados de forma automatica para obter um comportamento mais eficiente e robusto.
 
----
+## Documentacao da feira
 
-## 9. Estrutura do pacote
+O material de apresentacao em formato de poster ou de slides sera disponibilizado por meio de um link nesta secao.
 
-```
-evolutionary_explorer_ros/
-├── package.xml / setup.py / setup.cfg / resource/   # pacote ament_python
-├── config/
-│   ├── mission_params.yaml        # parâmetros (genoma) da missão
-│   └── controller_config.yaml     # diff_drive + gripper (ros2_control)
-├── description/robot.urdf.xacro    # robô (câmera segm., LIDAR, IMU, +farol)
-├── launch/
-│   ├── inicia_simulacao.launch.py  # mundo no Gazebo
-│   ├── carrega_robo.launch.py      # robô + sensores + bridge + rviz
-│   ├── missao.launch.py            # robô + controle autônomo (completo)
-│   └── teste_urdf.launch.py        # só URDF no RViz
-├── world/ , models/                # arenas e obstáculos
-├── rviz/                           # configs do RViz
-└── evolutionary_explorer_ros/
-    ├── mission_control.py          # MÁQUINA DE ESTADOS (cérebro)
-    ├── flag_detector.py            # percepção da bandeira
-    ├── navigation.py               # utilidades de LIDAR/navegação (sem ROS)
-    ├── mission_params.py           # parâmetros + suporte a genoma
-    ├── ground_truth_odometry.py    # odometria ground-truth + TF
-    └── robo_mapper.py              # mapa de ocupação (opcional)
-```
+## Creditos
 
-## 10. Documentação da feira (pôster/slides)
-
-> _Adicionar aqui o link para o pôster/slides da apresentação._
-
----
-
-## Créditos
-
-Baseado no pacote da disciplina SSC0712 (Prof. Dr. Matheus Machado dos Santos),
-`https://github.com/matheusbg8/prm_2026`. Licença Apache-2.0.
+Projeto baseado no pacote da disciplina SSC0712, sob responsabilidade do Prof. Dr. Matheus Machado dos Santos, disponivel em github.com/matheusbg8/prm_2026, sob licenca Apache 2.0.
