@@ -17,23 +17,30 @@ mission_control:
     control_frequency: 20.0
     start_immediately: true
 
-    # ---- EXPLORANDO (varredura em serpentina) ----
-    explore_linear_speed: 0.45
-    explore_serpentine_gain: 0.5
+    # ---- EXPLORANDO (varredura em serpentina + vies p/ lado inimigo) ----
+    explore_linear_speed: 0.30
+    explore_serpentine_gain: 0.4
     explore_serpentine_period: 8.0
+    explore_target_heading: 0.0    # rad (0 = +x, rumo a bandeira inimiga)
+    explore_heading_kp: 0.5        # ATRACAO p/ o rumo alvo (campo potencial)
+    repulse_gain: 2.0              # REPULSAO dos obstaculos (contorna cilindros)
+    stuck_window: 6.0              # s p/ detectar travamento
+    stuck_min_progress: 0.4        # m: deslocamento minimo na janela
+    escape_duration: 2.5           # s de manobra de escape
+    escape_turn_speed: 0.9         # rad/s do giro de escape
 
     # ---- Desvio de obstaculos (LIDAR) ----
     front_sector_half_angle_deg: 35.0
     side_sector_half_angle_deg: 70.0
-    obstacle_block_distance: 0.9
-    emergency_stop_distance: 0.35
-    avoid_linear_speed: 0.12
-    avoid_angular_speed: 1.0
+    obstacle_block_distance: 1.1
+    emergency_stop_distance: 0.45
+    avoid_linear_speed: 0.10
+    avoid_angular_speed: 0.8
 
     # ---- NAVEGANDO_PARA_BANDEIRA ----
-    nav_linear_speed: 0.4
+    nav_linear_speed: 0.30
     nav_angular_kp: 1.6
-    nav_max_angular_speed: 1.2
+    nav_max_angular_speed: 1.0
 
     # ---- POSICIONANDO_PARA_COLETA ----
     approach_distance: 1.3       # m: dist. frontal (LIDAR) p/ NAV->POSICIONANDO

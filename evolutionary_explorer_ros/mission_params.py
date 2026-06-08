@@ -43,28 +43,40 @@ class MissionParams:
     # Estado EXPLORANDO
     # Movimento de varredura (serpentina) sobreposto a um avanco constante.
     # ------------------------------------------------------------------ #
-    explore_linear_speed: float = 0.45        # m/s ao explorar
-    explore_serpentine_gain: float = 0.5      # rad/s amplitude da serpentina
+    explore_linear_speed: float = 0.30        # m/s ao explorar (reduzido p/ estabilidade)
+    explore_serpentine_gain: float = 0.4      # rad/s amplitude da serpentina
     explore_serpentine_period: float = 8.0    # s periodo da serpentina
+    # Vies direcional: o robo sabe que a bandeira inimiga esta do outro lado da
+    # arena (+x, a partir da base vermelha). Empurra a exploracao p/ esse rumo.
+    explore_target_heading: float = 0.0       # rad (0 = +x, lado inimigo)
+    explore_heading_kp: float = 0.5           # ganho de ATRACAO p/ o rumo alvo
+    repulse_gain: float = 2.0                 # ganho de REPULSAO dos obstaculos
+    #   (exploracao = campo potencial: atrai p/ +x e repele de obstaculos ->
+    #    o robo CONTORNA os cilindros em vez de empurra-los)
+    # Anti-travamento: se o robo nao progride, faz uma manobra de escape.
+    stuck_window: float = 6.0                 # s observados p/ detectar travamento
+    stuck_min_progress: float = 0.4           # m: deslocamento minimo na janela
+    escape_duration: float = 2.5              # s de manobra de escape
+    escape_turn_speed: float = 0.9            # rad/s do giro de escape
 
     # ------------------------------------------------------------------ #
     # Desvio de obstaculos com LIDAR (ativo em EXPLORANDO e NAVEGANDO)
     # ------------------------------------------------------------------ #
     front_sector_half_angle_deg: float = 35.0   # meia-largura do setor frontal
     side_sector_half_angle_deg: float = 70.0    # meia-largura dos setores laterais
-    obstacle_block_distance: float = 0.9         # m: dist. frontal que aciona desvio
-    emergency_stop_distance: float = 0.35        # m: dist. critica (para de avancar)
-    avoid_linear_speed: float = 0.12             # m/s durante o desvio
-    avoid_angular_speed: float = 1.0             # rad/s durante o desvio
+    obstacle_block_distance: float = 1.1         # m: dist. frontal que aciona desvio (cedo)
+    emergency_stop_distance: float = 0.45        # m: dist. critica (para de avancar)
+    avoid_linear_speed: float = 0.10             # m/s durante o desvio
+    avoid_angular_speed: float = 0.8             # rad/s durante o desvio
 
     # ------------------------------------------------------------------ #
     # Estado NAVEGANDO_PARA_BANDEIRA
     # Controle proporcional sobre o deslocamento horizontal da bandeira na
     # imagem (offset normalizado em [-1, 1]).
     # ------------------------------------------------------------------ #
-    nav_linear_speed: float = 0.4         # m/s ao navegar para a bandeira
+    nav_linear_speed: float = 0.30        # m/s ao navegar para a bandeira
     nav_angular_kp: float = 1.6           # ganho P sobre o offset horizontal
-    nav_max_angular_speed: float = 1.2    # rad/s saturacao do giro
+    nav_max_angular_speed: float = 1.0    # rad/s saturacao do giro
 
     # ------------------------------------------------------------------ #
     # Estado POSICIONANDO_PARA_COLETA
@@ -162,6 +174,9 @@ _GENOME_BOUNDS: Dict[str, Tuple[float, float]] = {
     'explore_linear_speed':       (0.10, 0.80),
     'explore_serpentine_gain':    (0.00, 1.20),
     'explore_serpentine_period':  (3.00, 15.0),
+    'explore_heading_kp':         (0.00, 2.00),
+    'repulse_gain':               (0.50, 4.00),
+    'escape_turn_speed':          (0.40, 1.50),
     # Desvio de obstaculos
     'front_sector_half_angle_deg': (15.0, 60.0),
     'obstacle_block_distance':    (0.50, 1.50),

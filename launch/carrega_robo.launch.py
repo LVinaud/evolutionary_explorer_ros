@@ -25,7 +25,9 @@ def generate_launch_description():
     # para testes e, na fase evolutiva, para variar o ponto de partida (robustez).
     spawn_x_arg = DeclareLaunchArgument("spawn_x", default_value="-8.0")
     spawn_y_arg = DeclareLaunchArgument("spawn_y", default_value="-0.5")
-    spawn_z_arg = DeclareLaunchArgument("spawn_z", default_value="1.0")
+    # z=0.3: queda suave (a base do robo descansa em ~0.15 m). Alturas altas
+    # (ex.: 1.0) causavam impacto forte no spawn e as vezes o robo CAPOTAVA.
+    spawn_z_arg = DeclareLaunchArgument("spawn_z", default_value="0.3")
     spawn_yaw_arg = DeclareLaunchArgument("spawn_yaw", default_value="0.0")
 
     # ------------------------------------------------------

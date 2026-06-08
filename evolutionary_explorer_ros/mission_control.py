@@ -57,11 +57,13 @@ comportamento apenas trocando os parametros, sem tocar nesta maquina de estados.
 
 import math
 from enum import Enum
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan, Imu
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float32, String
 from geometry_msgs.msg import Twist
 
@@ -106,6 +108,8 @@ class MissionControl(Node):
         self.create_subscription(Float32, '/flag/offset', self.flag_offset_cb, 10)
         self.create_subscription(Float32, '/flag/area_ratio', self.flag_area_cb, 10)
         self.create_subscription(Imu, '/imu', self.imu_cb, 10)
+        # Odometria (ground-truth) para detectar progresso/travamento.
+        self.create_subscription(Odometry, '/odom_gt', self.odom_cb, 10)
         # Comando de start opcional (so usado se start_immediately == False)
         self.create_subscription(Bool, '/mission/start', self.start_cb, 10)
 
@@ -115,6 +119,12 @@ class MissionControl(Node):
         self.flag_offset = 0.0            # ultimo /flag/offset
         self.flag_area = 0.0              # ultimo /flag/area_ratio
         self.yaw = 0.0                    # orientacao atual (do IMU)
+        self.tipped = False               # robo tombado? (seguranca via IMU)
+        self.x = 0.0                      # posicao (odometria)
+        self.y = 0.0
+        self.pos_history = deque()        # historico (t, x, y) p/ detectar travamento
+        self.escape_until = 0.0           # tempo ate o qual executa manobra de escape
+        self.escape_turn_dir = 1.0        # sentido do giro de escape
         self.detect_streak = 0            # frames consecutivos com deteccao
         self.last_seen_time = None        # instante da ultima deteccao positiva
         self.last_offset_sign = 1.0       # lado onde a bandeira foi vista
@@ -185,9 +195,35 @@ class MissionControl(Node):
     def imu_cb(self, msg: Imu):
         q = msg.orientation
         try:
-            self.yaw = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')[2]
+            roll, pitch, yaw = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')
+            self.yaw = yaw
+            # Robo considerado TOMBADO se muito inclinado (|roll| ou |pitch| > ~50 deg).
+            self.tipped = abs(roll) > 0.9 or abs(pitch) > 0.9
         except ValueError:
             pass
+
+    def odom_cb(self, msg: Odometry):
+        self.x = msg.pose.pose.position.x
+        self.y = msg.pose.pose.position.y
+
+    def _update_stuck_history(self):
+        """Mantem um historico recente de posicoes (janela stuck_window)."""
+        now = self.now()
+        self.pos_history.append((now, self.x, self.y))
+        while self.pos_history and now - self.pos_history[0][0] > self.p.stuck_window:
+            self.pos_history.popleft()
+
+    def _is_stuck(self) -> bool:
+        """True se o robo ficou confinado a uma regiao pequena na janela
+        (deslocamento total < stuck_min_progress) -> preso num loop/beco."""
+        if len(self.pos_history) < 2:
+            return False
+        if self.now() - self.pos_history[0][0] < self.p.stuck_window:
+            return False
+        xs = [p[1] for p in self.pos_history]
+        ys = [p[2] for p in self.pos_history]
+        spread = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        return spread < self.p.stuck_min_progress
 
     def start_cb(self, msg: Bool):
         if msg.data:
@@ -219,24 +255,42 @@ class MissionControl(Node):
             center_rad=0.0, half_width_rad=math.radians(12.0),
             range_min=s.range_min, range_max=s.range_max)
 
-    def avoidance_twist(self, sectors: nav.ScanSectors) -> Twist:
-        """Comando reativo de desvio de obstaculo (seguranca em 1o lugar).
+    def is_blocked(self, sectors: nav.ScanSectors) -> bool:
+        """Ha obstaculo proximo a frente OU nas diagonais frontais?
 
-        Vira para o lado mais livre; em distancia critica, para de avancar e
-        apenas gira no lugar."""
+        Considerar as diagonais (front_left/front_right) faz o robo reagir a
+        obstaculos que ele clipa de lado, nao so os bem a frente."""
+        d = self.p.obstacle_block_distance
+        return (sectors.front <= d or
+                sectors.front_left <= d * 0.85 or
+                sectors.front_right <= d * 0.85)
+
+    def avoidance_twist(self, sectors: nav.ScanSectors) -> Twist:
+        """Desvio: GIRA NO LUGAR (sem avancar) ate o caminho liberar.
+
+        Em vez de virar avancando -- o que faz o robo clipar/subir no obstaculo
+        e tombar -- ele para e gira para o lado mais aberto. So volta a avancar
+        quando a frente estiver livre (ver st_explorando/st_navegando)."""
         twist = Twist()
         turn_dir = 1.0 if sectors.front_blocked_side == 'left' else -1.0
         twist.angular.z = turn_dir * self.p.avoid_angular_speed
-        if sectors.front <= self.p.emergency_stop_distance:
-            twist.linear.x = 0.0          # muito perto: gira parado
-        else:
-            twist.linear.x = self.p.avoid_linear_speed
+        twist.linear.x = 0.0  # nao avanca contra o obstaculo
         return twist
 
     # ====================================================================== #
     # Loop principal: despacha o handler do estado atual
     # ====================================================================== #
     def control_loop(self):
+        # Seguranca: se o robo tombou, para de comandar velocidade (evita ficar
+        # "arando" o chao com as rodas e mascarar o problema).
+        if self.tipped:
+            self.get_logger().warn(
+                'Robo TOMBADO (inclinacao excessiva) - parando comandos.',
+                throttle_duration_sec=3.0)
+            self.cmd_pub.publish(Twist())
+            self.state_pub.publish(String(data=self.state.value))
+            return
+
         handlers = {
             State.AGUARDANDO_COMANDO: self.st_aguardando,
             State.EXPLORANDO: self.st_explorando,
@@ -269,16 +323,67 @@ class MissionControl(Node):
             self.transition_to(State.BANDEIRA_DETECTADA)
             return Twist()
 
-        sectors = self.read_sectors()
-        if sectors.front <= self.p.obstacle_block_distance:
-            return self.avoidance_twist(sectors)
+        now = self.now()
+        self._update_stuck_history()
 
-        # Caminho livre: avanca com serpentina senoidal (varredura).
+        # (a) Manobra de escape em andamento: recua COM FIRMEZA (p/ se soltar de
+        #     um cilindro em que tenha encravado) e gira para o lado aberto.
+        if now < self.escape_until:
+            twist = Twist()
+            twist.linear.x = -0.22
+            twist.angular.z = self.escape_turn_dir * self.p.escape_turn_speed
+            return twist
+
+        # (b) Detecta travamento -> inicia escape girando p/ o lado mais aberto.
+        if self._is_stuck():
+            sectors = self.read_sectors()
+            self.escape_turn_dir = 1.0 if sectors.left >= sectors.right else -1.0
+            self.escape_until = now + self.p.escape_duration
+            self.pos_history.clear()
+            self.get_logger().info('Exploracao travada -> manobra de escape.')
+            return Twist()
+
+        # (c) Direcao por CAMPO POTENCIAL: o robo e ATRAIDO para o rumo alvo
+        #     (+x, lado inimigo) e REPELIDO dos obstaculos ao mesmo tempo, de
+        #     forma que CONTORNA os cilindros suavemente enquanto avanca (em vez
+        #     de empurra-los). Sempre se move (mais devagar perto de obstaculo;
+        #     so gira parado se em distancia critica).
+        sectors = self.read_sectors()
+        react = self.p.obstacle_block_distance
+
+        def prox(d):
+            # 0 (longe) .. 1 (encostando): intensidade da repulsao
+            return max(0.0, (react - d) / react) if d < react else 0.0
+
+        # Atracao para o rumo alvo (+x)
+        heading_error = nav.wrap_to_pi(self.p.explore_target_heading - self.yaw)
+        attract = self.p.explore_heading_kp * heading_error
+        # Repulsao lateral: obstaculo a frente-esq -> vira p/ direita (e vice-versa)
+        repulse = self.p.repulse_gain * (prox(sectors.front_right) -
+                                         prox(sectors.front_left))
+        # Obstaculo bem a frente: reforca o giro para o lado MAIS ABERTO
+        if sectors.front < react:
+            side = 1.0 if sectors.front_left >= sectors.front_right else -1.0
+            repulse += side * self.p.repulse_gain * prox(sectors.front)
+        # Serpentina leve so com caminho livre (cobertura)
+        serp = 0.0
+        if not self.is_blocked(sectors):
+            phase = 2.0 * math.pi * (now - self.t0) / \
+                max(0.1, self.p.explore_serpentine_period)
+            serp = self.p.explore_serpentine_gain * math.sin(phase)
+
         twist = Twist()
-        twist.linear.x = self.p.explore_linear_speed
-        phase = 2.0 * math.pi * (self.now() - self.t0) / \
-            max(0.1, self.p.explore_serpentine_period)
-        twist.angular.z = self.p.explore_serpentine_gain * math.sin(phase)
+        twist.angular.z = nav.clamp(attract + repulse + serp,
+                                    -self.p.nav_max_angular_speed,
+                                    self.p.nav_max_angular_speed)
+        # Velocidade: reduz perto de obstaculo; zera (so gira) se critico
+        front_min = min(sectors.front, sectors.front_left, sectors.front_right)
+        if front_min <= self.p.emergency_stop_distance:
+            twist.linear.x = 0.0
+        else:
+            scale = (front_min - self.p.emergency_stop_distance) / \
+                max(0.01, react - self.p.emergency_stop_distance)
+            twist.linear.x = self.p.explore_linear_speed * nav.clamp(scale, 0.25, 1.0)
         return twist
 
     # ---------------------------------------------------------------------- #
@@ -321,11 +426,11 @@ class MissionControl(Node):
             return Twist()
 
         sectors = self.read_sectors()
-        # Desvio de obstaculos: SO desvia se o obstaculo a frente NAO for a
-        # bandeira (isto e, a bandeira nao esta centralizada). Se a bandeira
-        # esta bem a frente, o "obstaculo" e ela mesma -> seguimos em direcao a
-        # ela (o posicionamento cuida de parar na distancia certa).
-        if sectors.front <= self.p.obstacle_block_distance and not centered:
+        # Desvio de obstaculos: SO desvia se o obstaculo NAO for a bandeira
+        # (isto e, a bandeira nao esta centralizada). Se a bandeira esta bem a
+        # frente, o "obstaculo" e ela mesma -> seguimos em direcao a ela (o
+        # posicionamento cuida de parar na distancia certa).
+        if self.is_blocked(sectors) and not centered:
             return self.avoidance_twist(sectors)
 
         # Caminho livre (ou bandeira a frente): persegue a bandeira.
