@@ -18,7 +18,12 @@ def generate_launch_description():
         'GZ_SIM_SYSTEM_PLUGIN_PATH': ':'.join([
             os.environ.get('GZ_SIM_SYSTEM_PLUGIN_PATH', default=''),
             os.environ.get('LD_LIBRARY_PATH', default='')
-        ])
+        ]),
+        # LIBGL_ALWAYS_SOFTWARE controla a renderizacao OpenGL. Em maquina
+        # virtual sem aceleracao 3D (por exemplo VMware), a janela do Gazebo
+        # fica em branco com a engine ogre2. Passe software_render:=1 para
+        # renderizar por software, mais lento porem visivel.
+        'LIBGL_ALWAYS_SOFTWARE': LaunchConfiguration('software_render'),
     }
 
     # Nível de verbosidade do Gazebo (0: silencioso, 4: mais detalhado)
@@ -33,6 +38,13 @@ def generate_launch_description():
         'world',
         default_value='arena_cilindros.sdf',
         description='Nome do arquivo .sdf do mundo a ser carregado'
+    )
+
+    # Renderizacao por software (1) para VM sem aceleracao 3D, ou hardware (0).
+    software_render_arg = DeclareLaunchArgument(
+        'software_render',
+        default_value='0',
+        description='1 renderiza por software (VM sem GPU 3D), 0 usa a GPU'
     )
 
     # Encontra o diretório de instalação do pacote 'evolutionary_explorer_ros'.
@@ -134,6 +146,7 @@ def generate_launch_description():
     return LaunchDescription([
         world_file_arg,
         headless_arg,
+        software_render_arg,
         gz_set_env,
         bridge,
         gazebo_gui,

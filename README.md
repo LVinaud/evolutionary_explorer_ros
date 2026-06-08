@@ -45,6 +45,16 @@ source ~/ros2_ws/install/setup.bash
 ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py
 ```
 
+Importante para quem usa maquina virtual. Em uma maquina virtual sem aceleracao de video 3D, por exemplo com o adaptador grafico VMware SVGA, a janela do Gazebo pode abrir com a area de visualizacao em branco e o quadriculado piscando, mesmo com o mundo carregado corretamente. Isso acontece porque a engine de renderizacao ogre2 nao consegue desenhar a cena 3D com o driver de video virtual. O servidor da simulacao continua funcionando normalmente, e a prova disso e que a arvore de entidades do Gazebo lista todos os modelos e o RViz mostra o robo. Para que a janela do Gazebo tambem mostre a cena, inicie o mundo com a renderizacao por software ligada, usando o argumento software_render com valor 1. A simulacao fica mais lenta porque a CPU passa a desenhar a cena, mas o mundo aparece.
+
+```
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py software_render:=1
+```
+
+Apenas o lancamento do mundo precisa do argumento software_render, porque e ele que abre a janela do Gazebo. O lancamento da missao, descrito a seguir, nao precisa desse argumento. Como alternativa mais rapida, quando for possivel alterar as configuracoes da maquina virtual, ative a aceleracao de graficos 3D nas opcoes de video da maquina virtual e instale as ferramentas de integracao do sistema convidado. Isso usa a GPU do hospedeiro e dispensa a renderizacao por software. Existe ainda o argumento headless com valor true, que executa o Gazebo sem janela grafica, util para testes automatizados e para a fase de computacao evolutiva.
+
 No segundo terminal, depois que a arena terminar de abrir, carregue o robo e o controle autonomo da missao. Esse comando coloca o robo no mundo, sobe os sensores, estabelece a ponte entre o Gazebo e o ROS, abre o RViz, publica a odometria de referencia e inicia os nos de percepcao da bandeira e de controle da missao. O robo passa a explorar automaticamente.
 
 ```
