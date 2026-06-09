@@ -1,5 +1,5 @@
 # evolutionary_explorer_ros
-
+Alunos: Lázaro Pereira Vinaud Neto, Gabriel Antunes Afonso de Araújo
 ## Visão geral
 
 Este pacote ROS 2 implementa o sistema de controle de um robô móvel diferencial que explora um ambiente simulado, localiza a bandeira do time adversário por visão computacional, navega até ela desviando de obstáculos com o sensor LIDAR e se posiciona de frente para ela para a coleta. Todo o comportamento é coordenado por uma máquina de estados, que é o módulo central do trabalho. O projeto foi desenvolvido para a disciplina SSC0712 Programação de Robôs Móveis do ICMC USP e utiliza ROS 2 Humble com o simulador Gazebo Fortress.
@@ -177,7 +177,7 @@ O robô não tomba mais ao encostar em obstáculos e a missão completa, da expl
 
 ## Documentação da feira
 
-O material de apresentação em formato de pôster ou de slides será disponibilizado por meio de um link nesta seção.
+O material de apresentação em formato de pôster e de slides está disponível no repositório.
 
 ## Créditos
 
