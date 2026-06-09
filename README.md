@@ -159,6 +159,9 @@ O robo nao tomba mais ao encostar em obstaculos e a missao completa, da deteccao
 
 O material de apresentacao em formato de poster ou de slides está disponivel nos arquivos do repositório.
 
+Poster: poster_robo_explorador_evolutivo (1).pdf
+Slides: slides_robo_explorador_evolutivo.pptx
+
 ## Creditos
 
 Projeto baseado no pacote da disciplina SSC0712, sob responsabilidade do Prof. Dr. Matheus Machado dos Santos, disponivel em github.com/matheusbg8/prm_2026, sob licenca Apache 2.0.
