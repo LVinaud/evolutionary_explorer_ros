@@ -157,7 +157,7 @@ O robo nao tomba mais ao encostar em obstaculos e a missao completa, da deteccao
 
 ## Documentacao da feira
 
-O material de apresentacao em formato de poster ou de slides sera disponibilizado por meio de um link nesta secao.
+O material de apresentacao em formato de poster ou de slides está disponivel nos arquivos do repositório.
 
 ## Creditos
 
