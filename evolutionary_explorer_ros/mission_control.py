@@ -71,6 +71,7 @@ from scipy.spatial.transform import Rotation as R
 
 from .mission_params import MissionParams
 from . import navigation as nav
+from .planner import OccupancyPlanner
 
 
 # Campo de visao horizontal da camera (rad), conforme o URDF (horizontal_fov).
@@ -122,9 +123,17 @@ class MissionControl(Node):
         self.tipped = False               # robo tombado? (seguranca via IMU)
         self.x = 0.0                      # posicao (odometria)
         self.y = 0.0
+        self.have_odom = False            # ja recebeu a primeira pose?
         self.pos_history = deque()        # historico (t, x, y) p/ detectar travamento
         self.escape_until = 0.0           # tempo ate o qual executa manobra de escape
         self.escape_turn_dir = 1.0        # sentido do giro de escape
+
+        # ---- Mapa de ocupacao (construido pelo LIDAR) + planejador A estrela ----
+        self.gplanner = OccupancyPlanner(resolution=self.p.plan_resolution,
+                                         robot_radius=self.p.plan_robot_radius)
+        self.path = []                    # rota atual (lista de waypoints)
+        self.path_goal = None             # objetivo da rota atual
+        self.last_plan_time = 0.0
         self.detect_streak = 0            # frames consecutivos com deteccao
         self.last_seen_time = None        # instante da ultima deteccao positiva
         self.last_offset_sign = 1.0       # lado onde a bandeira foi vista
@@ -175,6 +184,13 @@ class MissionControl(Node):
     # ====================================================================== #
     def scan_cb(self, msg: LaserScan):
         self.scan = msg
+        # Constroi a grade de ocupacao a partir do LIDAR (so com pose valida).
+        # Ignora retornos muito proximos para nao mapear o proprio robo/garra.
+        if self.have_odom:
+            self.gplanner.update_from_scan(
+                self.x, self.y, self.yaw, msg.ranges,
+                msg.angle_min, msg.angle_increment,
+                max(msg.range_min, 0.35), msg.range_max)
 
     def flag_detected_cb(self, msg: Bool):
         if msg.data:
@@ -195,8 +211,7 @@ class MissionControl(Node):
     def imu_cb(self, msg: Imu):
         q = msg.orientation
         try:
-            roll, pitch, yaw = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')
-            self.yaw = yaw
+            roll, pitch, _ = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')
             # Robo considerado TOMBADO se muito inclinado (|roll| ou |pitch| > ~50 deg).
             self.tipped = abs(roll) > 0.9 or abs(pitch) > 0.9
         except ValueError:
@@ -205,6 +220,12 @@ class MissionControl(Node):
     def odom_cb(self, msg: Odometry):
         self.x = msg.pose.pose.position.x
         self.y = msg.pose.pose.position.y
+        q = msg.pose.pose.orientation
+        try:
+            self.yaw = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')[2]
+        except ValueError:
+            pass
+        self.have_odom = True
 
     def _update_stuck_history(self):
         """Mantem um historico recente de posicoes (janela stuck_window)."""
@@ -224,6 +245,27 @@ class MissionControl(Node):
         ys = [p[2] for p in self.pos_history]
         spread = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
         return spread < self.p.stuck_min_progress
+
+    def _maybe_escape(self):
+        """Manobra de escape global p/ tirar o robo de travamentos (minimo
+        local do campo potencial ou encravamento em cilindro). Retorna o comando
+        de escape (recua firme + gira p/ o lado mais aberto) enquanto a manobra
+        dura, inicia uma nova manobra se acabou de travar, ou None se nao ha
+        escape a fazer."""
+        now = self.now()
+        if now < self.escape_until:
+            twist = Twist()
+            twist.linear.x = -0.22
+            twist.angular.z = self.escape_turn_dir * self.p.escape_turn_speed
+            return twist
+        if self._is_stuck():
+            sectors = self.read_sectors()
+            self.escape_turn_dir = 1.0 if sectors.left >= sectors.right else -1.0
+            self.escape_until = now + self.p.escape_duration
+            self.pos_history.clear()
+            self.get_logger().info('Robo travado -> manobra de escape.')
+            return Twist()
+        return None
 
     def start_cb(self, msg: Bool):
         if msg.data:
@@ -278,6 +320,75 @@ class MissionControl(Node):
         return twist
 
     # ====================================================================== #
+    # Navegacao: A estrela sobre a grade construida pelo LIDAR (+ fallback)
+    # ====================================================================== #
+    def _reactive_twist(self, direction: float) -> Twist:
+        """Campo potencial reativo rumo a 'direction' (rad, mundo): atrai para a
+        direcao e repele dos obstaculos. Usado como fallback quando A estrela
+        nao encontra rota na grade atual."""
+        sectors = self.read_sectors()
+        react = self.p.obstacle_block_distance
+
+        def prox(d):
+            return max(0.0, (react - d) / react) if d < react else 0.0
+
+        attract = self.p.explore_heading_kp * nav.wrap_to_pi(direction - self.yaw)
+        repulse = self.p.repulse_gain * (prox(sectors.front_right) -
+                                         prox(sectors.front_left))
+        if sectors.front < react:
+            side = 1.0 if sectors.front_left >= sectors.front_right else -1.0
+            repulse += side * self.p.repulse_gain * prox(sectors.front)
+        twist = Twist()
+        twist.angular.z = nav.clamp(attract + repulse,
+                                    -self.p.nav_max_angular_speed,
+                                    self.p.nav_max_angular_speed)
+        front_min = min(sectors.front, sectors.front_left, sectors.front_right)
+        if front_min <= self.p.emergency_stop_distance:
+            twist.linear.x = 0.0
+        else:
+            scale = (front_min - self.p.emergency_stop_distance) / \
+                max(0.01, react - self.p.emergency_stop_distance)
+            twist.linear.x = self.p.nav_linear_speed * nav.clamp(scale, 0.25, 1.0)
+        return twist
+
+    def _plan_follow_twist(self, direction: float) -> Twist:
+        """Planeja por A estrela ate um ponto a 'lookahead' na direcao dada,
+        sobre a grade construida pelo LIDAR, e segue o proximo waypoint. Como a
+        grade vai sendo preenchida enquanto o robo anda, a rota e replanejada
+        periodicamente. Se nao houver rota, cai no metodo reativo."""
+        now = self.now()
+        ld = self.p.lookahead_distance
+        goal = (self.x + ld * math.cos(direction),
+                self.y + ld * math.sin(direction))
+
+        if not self.path or now - self.last_plan_time > self.p.replan_period:
+            self.path = self.gplanner.plan((self.x, self.y), goal)
+            self.path_goal = goal
+            self.last_plan_time = now
+
+        if not self.path:
+            return self._reactive_twist(direction)
+
+        # Descarta waypoints ja atingidos.
+        while (len(self.path) > 1 and
+               math.hypot(self.path[0][0] - self.x,
+                          self.path[0][1] - self.y) < self.p.waypoint_tolerance):
+            self.path.pop(0)
+        wx, wy = self.path[0]
+        yaw_err = nav.wrap_to_pi(math.atan2(wy - self.y, wx - self.x) - self.yaw)
+
+        twist = Twist()
+        twist.angular.z = nav.clamp(self.p.goto_angular_kp * yaw_err,
+                                    -self.p.nav_max_angular_speed,
+                                    self.p.nav_max_angular_speed)
+        # Avanca, reduzindo se precisa girar muito; para em distancia critica.
+        speed = self.p.nav_linear_speed * max(0.2, 1.0 - abs(yaw_err) / 1.2)
+        if self.front_distance() <= self.p.emergency_stop_distance:
+            speed = 0.0
+        twist.linear.x = speed
+        return twist
+
+    # ====================================================================== #
     # Loop principal: despacha o handler do estado atual
     # ====================================================================== #
     def control_loop(self):
@@ -290,6 +401,19 @@ class MissionControl(Node):
             self.cmd_pub.publish(Twist())
             self.state_pub.publish(String(data=self.state.value))
             return
+
+        # Atualiza o historico de progresso e, nos estados de travessia
+        # (explorando ou navegando ate a bandeira), aplica uma manobra de
+        # escape se o robo travar. Isso tira o robo de minimos locais do campo
+        # potencial e de encravamentos entre cilindros, valendo tanto na
+        # exploracao quanto na navegacao ate a bandeira.
+        self._update_stuck_history()
+        if self.state in (State.EXPLORANDO, State.NAVEGANDO_PARA_BANDEIRA):
+            escape = self._maybe_escape()
+            if escape is not None:
+                self.cmd_pub.publish(escape)
+                self.state_pub.publish(String(data=self.state.value))
+                return
 
         handlers = {
             State.AGUARDANDO_COMANDO: self.st_aguardando,
@@ -315,76 +439,16 @@ class MissionControl(Node):
 
     # ---------------------------------------------------------------------- #
     # ESTADO: EXPLORANDO
-    # Varre a arena (avanco + serpentina) procurando a bandeira, desviando de
-    # obstaculos com o LIDAR. Sai quando a bandeira e confirmada.
+    # Avanca rumo ao lado inimigo (+x) procurando a bandeira. Constroi a grade
+    # de ocupacao pelo LIDAR e usa A estrela sobre ela para contornar os
+    # obstaculos. Sai quando a bandeira e confirmada pela visao.
     # ---------------------------------------------------------------------- #
     def st_explorando(self) -> Twist:
         if self.flag_visible:
             self.transition_to(State.BANDEIRA_DETECTADA)
             return Twist()
-
-        now = self.now()
-        self._update_stuck_history()
-
-        # (a) Manobra de escape em andamento: recua COM FIRMEZA (p/ se soltar de
-        #     um cilindro em que tenha encravado) e gira para o lado aberto.
-        if now < self.escape_until:
-            twist = Twist()
-            twist.linear.x = -0.22
-            twist.angular.z = self.escape_turn_dir * self.p.escape_turn_speed
-            return twist
-
-        # (b) Detecta travamento -> inicia escape girando p/ o lado mais aberto.
-        if self._is_stuck():
-            sectors = self.read_sectors()
-            self.escape_turn_dir = 1.0 if sectors.left >= sectors.right else -1.0
-            self.escape_until = now + self.p.escape_duration
-            self.pos_history.clear()
-            self.get_logger().info('Exploracao travada -> manobra de escape.')
-            return Twist()
-
-        # (c) Direcao por CAMPO POTENCIAL: o robo e ATRAIDO para o rumo alvo
-        #     (+x, lado inimigo) e REPELIDO dos obstaculos ao mesmo tempo, de
-        #     forma que CONTORNA os cilindros suavemente enquanto avanca (em vez
-        #     de empurra-los). Sempre se move (mais devagar perto de obstaculo;
-        #     so gira parado se em distancia critica).
-        sectors = self.read_sectors()
-        react = self.p.obstacle_block_distance
-
-        def prox(d):
-            # 0 (longe) .. 1 (encostando): intensidade da repulsao
-            return max(0.0, (react - d) / react) if d < react else 0.0
-
-        # Atracao para o rumo alvo (+x)
-        heading_error = nav.wrap_to_pi(self.p.explore_target_heading - self.yaw)
-        attract = self.p.explore_heading_kp * heading_error
-        # Repulsao lateral: obstaculo a frente-esq -> vira p/ direita (e vice-versa)
-        repulse = self.p.repulse_gain * (prox(sectors.front_right) -
-                                         prox(sectors.front_left))
-        # Obstaculo bem a frente: reforca o giro para o lado MAIS ABERTO
-        if sectors.front < react:
-            side = 1.0 if sectors.front_left >= sectors.front_right else -1.0
-            repulse += side * self.p.repulse_gain * prox(sectors.front)
-        # Serpentina leve so com caminho livre (cobertura)
-        serp = 0.0
-        if not self.is_blocked(sectors):
-            phase = 2.0 * math.pi * (now - self.t0) / \
-                max(0.1, self.p.explore_serpentine_period)
-            serp = self.p.explore_serpentine_gain * math.sin(phase)
-
-        twist = Twist()
-        twist.angular.z = nav.clamp(attract + repulse + serp,
-                                    -self.p.nav_max_angular_speed,
-                                    self.p.nav_max_angular_speed)
-        # Velocidade: reduz perto de obstaculo; zera (so gira) se critico
-        front_min = min(sectors.front, sectors.front_left, sectors.front_right)
-        if front_min <= self.p.emergency_stop_distance:
-            twist.linear.x = 0.0
-        else:
-            scale = (front_min - self.p.emergency_stop_distance) / \
-                max(0.01, react - self.p.emergency_stop_distance)
-            twist.linear.x = self.p.explore_linear_speed * nav.clamp(scale, 0.25, 1.0)
-        return twist
+        # Navega rumo ao lado inimigo planejando sobre a grade construida.
+        return self._plan_follow_twist(self.p.explore_target_heading)
 
     # ---------------------------------------------------------------------- #
     # ESTADO: BANDEIRA_DETECTADA
@@ -405,44 +469,32 @@ class MissionControl(Node):
 
     # ---------------------------------------------------------------------- #
     # ESTADO: NAVEGANDO_PARA_BANDEIRA
-    # Vai em direcao a bandeira (controle P sobre o offset), mas o desvio de
-    # obstaculos (LIDAR) tem PRIORIDADE sobre a perseguicao. Sai para
-    # posicionamento quando a bandeira esta perto (area) e ~centralizada.
+    # Vai em direcao a bandeira combinando atracao para ela (pelo deslocamento
+    # na imagem) com repulsao dos obstaculos (LIDAR), de modo a contornar os
+    # cilindros a caminho. Sai para posicionamento quando a bandeira esta perto
+    # e ~centralizada.
     # ---------------------------------------------------------------------- #
     def st_navegando(self) -> Twist:
         if self.time_since_seen() > self.p.detect_lost_timeout:
             self.transition_to(State.REDETECTANDO_BANDEIRA)
             return Twist()
 
-        front = self.front_distance()
-        centered = abs(self.flag_offset) < 0.30
-
-        # Transicao para posicionamento: a bandeira (centralizada) ja esta perto.
-        # Usamos a distancia frontal do LIDAR como gatilho principal (a bandeira
-        # aparece pequena na imagem) e a area como gatilho secundario.
-        if centered and (front <= self.p.approach_distance or
-                         self.flag_area >= self.p.approach_area_ratio):
+        # Transicao para posicionamento: a bandeira fica GRANDE na imagem, ou
+        # seja, esta perto de verdade. Nao usamos a distancia do LIDAR como
+        # gatilho porque um cilindro entre o robo e a bandeira a confundiria com
+        # a bandeira e o robo pararia cedo demais.
+        if (abs(self.flag_offset) < 0.5 and
+                self.flag_area >= self.p.approach_area_ratio):
             self.transition_to(State.POSICIONANDO_PARA_COLETA)
             return Twist()
 
-        sectors = self.read_sectors()
-        # Desvio de obstaculos: SO desvia se o obstaculo NAO for a bandeira
-        # (isto e, a bandeira nao esta centralizada). Se a bandeira esta bem a
-        # frente, o "obstaculo" e ela mesma -> seguimos em direcao a ela (o
-        # posicionamento cuida de parar na distancia certa).
-        if self.is_blocked(sectors) and not centered:
-            return self.avoidance_twist(sectors)
-
-        # Caminho livre (ou bandeira a frente): persegue a bandeira.
-        twist = Twist()
-        twist.linear.x = self.p.nav_linear_speed
-        # Reduz a velocidade ao se aproximar para nao "atropelar" a bandeira.
-        if front <= self.p.obstacle_block_distance:
-            twist.linear.x = min(twist.linear.x, self.p.avoid_linear_speed * 2.0)
-        twist.angular.z = nav.clamp(
-            -self.p.nav_angular_kp * self.flag_offset,
-            -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
-        return twist
+        # Navega ate a bandeira planejando A estrela sobre a grade construida
+        # pelo LIDAR. A direcao alvo e a da bandeira VISTA PELA CAMERA, ou seja,
+        # o rumo atual do robo somado ao deslocamento angular da bandeira na
+        # imagem. Assim a visao direciona, e o planejador contorna os obstaculos
+        # mapeados a caminho, sem prender nos cilindros laterais.
+        flag_dir = self.yaw - self.flag_offset * (CAMERA_H_FOV / 2.0)
+        return self._plan_follow_twist(flag_dir)
 
     # ---------------------------------------------------------------------- #
     # ESTADO: POSICIONANDO_PARA_COLETA
@@ -467,6 +519,13 @@ class MissionControl(Node):
                 'Missao concluida.')
             self.transition_to(State.MISSAO_CONCLUIDA)
             return Twist()
+
+        # Se ha um obstaculo ENTRE o robo e a bandeira (algo perto a frente, mas
+        # a bandeira ainda nao esta grande/perto), contorna por A estrela em vez
+        # de avancar reto contra o cilindro.
+        if not flag_close and self.is_blocked(self.read_sectors()):
+            flag_dir = self.yaw - self.flag_offset * (CAMERA_H_FOV / 2.0)
+            return self._plan_follow_twist(flag_dir)
 
         twist = Twist()
         # Centralizacao fina da bandeira.

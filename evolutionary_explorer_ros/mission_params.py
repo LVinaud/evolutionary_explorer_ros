@@ -97,6 +97,20 @@ class MissionParams:
     centering_tolerance: float = 0.06     # offset normalizado considerado centrado
 
     # ------------------------------------------------------------------ #
+    # Navegacao planejada por A estrela sobre a grade construida pelo LIDAR.
+    # O robo NAO conhece os obstaculos de antemao: ele monta a grade enquanto
+    # explora. A estrela planeja uma rota livre ate um ponto a frente, na
+    # direcao desejada (rumo ao inimigo na exploracao, rumo a bandeira vista
+    # pela camera na navegacao). Isso evita os minimos locais do metodo reativo.
+    # ------------------------------------------------------------------ #
+    plan_resolution: float = 0.20    # m por celula da grade de ocupacao
+    plan_robot_radius: float = 0.30  # raio do robo p/ inflar os obstaculos
+    lookahead_distance: float = 3.0  # m: ponto-alvo a frente, na direcao desejada
+    goto_angular_kp: float = 1.8     # ganho de rumo ao seguir um waypoint
+    waypoint_tolerance: float = 0.45  # m: distancia p/ considerar waypoint atingido
+    replan_period: float = 1.5       # s: re-planeja sobre a grade atualizada
+
+    # ------------------------------------------------------------------ #
     # Deteccao e transicoes da maquina de estados
     # ------------------------------------------------------------------ #
     detect_confirm_frames: int = 1        # frames p/ confirmar deteccao (1 = trava rapido)

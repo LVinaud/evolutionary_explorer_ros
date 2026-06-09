@@ -80,7 +80,7 @@ flag_detector:
     # Area minima do blob (contourArea, em px) para considerar a bandeira
     # detectada. Calibrado em simulacao: 20 detecta a bandeira azul ja de longe
     # (~6 m) de forma mais estavel; so a bandeira tem label 25, sem falso positivo.
-    min_blob_area: 20
+    min_blob_area: 10
 
     # Publica /flag/debug_image com a deteccao desenhada (depuracao no rqt/RViz).
     publish_debug_image: true

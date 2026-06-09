@@ -49,7 +49,7 @@ class FlagDetector(Node):
         self.declare_parameter('target_color_b', 171)
         self.declare_parameter('target_color_g', 242)
         self.declare_parameter('target_color_r', 0)
-        self.declare_parameter('min_blob_area', 20)
+        self.declare_parameter('min_blob_area', 10)
         self.declare_parameter('publish_debug_image', True)
 
         self.target_label = int(self.get_parameter('target_label').value)
