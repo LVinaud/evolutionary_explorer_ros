@@ -190,13 +190,14 @@ def generate_launch_description():
         arguments=[
             "/scan@sensor_msgs/msg/LaserScan@ignition.msgs.LaserScan",
             "/imu@sensor_msgs/msg/Imu@ignition.msgs.IMU",
-            # Camera RGB comum (Trabalho 2): usada na deteccao por cor.
-            "/rgb_cam@sensor_msgs/msg/Image@ignition.msgs.Image",
-            "/rgb_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
-            # Camera de segmentacao semantica (T1) desativada no T2:
-            # "/robot_cam/labels_map@sensor_msgs/msg/Image@ignition.msgs.Image",
-            # "/robot_cam/colored_map@sensor_msgs/msg/Image@ignition.msgs.Image",
-            # "/robot_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
+            # Camera RGB comum (T2): disponivel para deteccao por cor, mas
+            # desativada por padrao (a cor nao distingue bandeira da base azul).
+            # "/rgb_cam@sensor_msgs/msg/Image@ignition.msgs.Image",
+            # "/rgb_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
+            # Camera de segmentacao semantica (deteccao padrao por etiqueta 25):
+            "/robot_cam/labels_map@sensor_msgs/msg/Image@ignition.msgs.Image",
+            "/robot_cam/colored_map@sensor_msgs/msg/Image@ignition.msgs.Image",
+            "/robot_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
             # Camera de detectao bounding box
             # "/boxes_visible_2d_image@sensor_msgs/msg/Image@ignition.msgs.Image",
             # "/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",

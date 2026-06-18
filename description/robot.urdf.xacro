@@ -446,10 +446,13 @@
 
   <gazebo reference="camera_link">
 
-    <!-- Camera comum RGB (Trabalho 2): a deteccao por cor usa esta imagem.
-         Publica em /rgb_cam, topico separado da camera de segmentacao para
-         nao haver conflito. A bandeira azul tem a mascara RGB 0,73,227. -->
-    <sensor name="rgb_cam" type="camera">
+    <!-- Camera RGB comum (Trabalho 2): disponivel para deteccao por cor, mas
+         desativada por padrao. No mundo a bandeira azul e a base azul tem a
+         mesma cor, entao a cor sozinha nao distingue a bandeira da base. A
+         deteccao padrao usa a segmentacao (etiqueta 25 = so a bandeira). Para
+         usar cor, reative este sensor e a ponte /rgb_cam, e ponha o
+         flag_detector em detection_mode:=color. -->
+    <!-- <sensor name="rgb_cam" type="camera">
       <camera>
         <horizontal_fov>1.57</horizontal_fov>
         <image>
@@ -466,13 +469,12 @@
       <update_rate>15</update_rate>
       <visualize>true</visualize>
       <topic>rgb_cam</topic>
-    </sensor>
+    </sensor> -->
 
-    <!-- Camera de segmentacao semantica do T1, desativada no T2: a deteccao
-         passou a ser por cor na camera RGB. Manter as duas cameras ativas
-         dobrava a carga de renderizacao e desestabilizava o simulador. Fica
-         preservada aqui caso seja necessario reativar a segmentacao. -->
-    <!-- <sensor name="robot_cam" type="segmentation">
+    <!-- Camera de segmentacao semantica: cada pixel guarda a etiqueta do
+         objeto. A bandeira inimiga azul e a etiqueta 25, distinta da base azul,
+         o que permite mira-la sem confundir com a base nem com o piso azul. -->
+    <sensor name="robot_cam" type="segmentation">
       <topic>robot_cam</topic>
       <camera>
         <segmentation_type>semantic</segmentation_type>
@@ -489,7 +491,7 @@
       <always_on>1</always_on>
       <update_rate>15</update_rate>
       <visualize>true</visualize>
-    </sensor> -->
+    </sensor>
 
     <!-- Insere uma camera bounding box 2D completo -->
     <!-- <sensor name="full_2d" type="boundingbox_camera">

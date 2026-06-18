@@ -48,7 +48,7 @@ class FlagDetector(Node):
         # (/rgb_cam). A bandeira azul inimiga tem a mascara RGB 0,73,227 dada no
         # enunciado. Em vez de casar a cor exata (fragil sob iluminacao), usamos
         # uma faixa em HSV em torno do azul, robusta a variacoes de brilho.
-        self.declare_parameter('detection_mode', 'color')      # "color" | "labels"
+        self.declare_parameter('detection_mode', 'labels')     # "labels" | "color"
         self.declare_parameter('image_topic', '/rgb_cam')      # camera RGB do T2
         self.declare_parameter('target_label', 25)             # usado no modo labels
         # Faixa HSV (OpenCV: H 0-179) que isola o azul da bandeira. O azul do
