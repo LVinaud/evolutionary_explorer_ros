@@ -64,7 +64,7 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan, Imu
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Bool, Float32, String
+from std_msgs.msg import Bool, Float32, String, Float64MultiArray
 from geometry_msgs.msg import Twist
 
 from scipy.spatial.transform import Rotation as R
@@ -85,6 +85,10 @@ class State(Enum):
     BANDEIRA_DETECTADA = 'BANDEIRA_DETECTADA'
     NAVEGANDO_PARA_BANDEIRA = 'NAVEGANDO_PARA_BANDEIRA'
     POSICIONANDO_PARA_COLETA = 'POSICIONANDO_PARA_COLETA'
+    CAPTURANDO_BANDEIRA = 'CAPTURANDO_BANDEIRA'
+    RETORNANDO_PARA_BASE = 'RETORNANDO_PARA_BASE'
+    POSICIONANDO_PARA_DEPOSITO = 'POSICIONANDO_PARA_DEPOSITO'
+    DEPOSITANDO_BANDEIRA = 'DEPOSITANDO_BANDEIRA'
     REDETECTANDO_BANDEIRA = 'REDETECTANDO_BANDEIRA'
     MISSAO_CONCLUIDA = 'MISSAO_CONCLUIDA'
 
@@ -102,6 +106,10 @@ class MissionControl(Node):
         # Estado atual publicado para depuracao/monitoramento (e util como
         # "sensor" de fitness na fase evolutiva).
         self.state_pub = self.create_publisher(String, '/mission/state', 10)
+        # Comandos da garra (Trabalho 2): vetor [elevacao, direito, esquerdo],
+        # na ordem do controlador do professor.
+        self.gripper_pub = self.create_publisher(
+            Float64MultiArray, '/gripper_controller/commands', 10)
 
         # ---- Subscribers ----
         self.create_subscription(LaserScan, '/scan', self.scan_cb, 10)
@@ -124,6 +132,9 @@ class MissionControl(Node):
         self.x = 0.0                      # posicao (odometria)
         self.y = 0.0
         self.have_odom = False            # ja recebeu a primeira pose?
+        # Pose inicial (centro da base vermelha): referencia do deposito (T2).
+        self.start_x = None
+        self.start_y = None
         self.pos_history = deque()        # historico (t, x, y) p/ detectar travamento
         self.escape_until = 0.0           # tempo ate o qual executa manobra de escape
         self.escape_turn_dir = 1.0        # sentido do giro de escape
@@ -168,6 +179,21 @@ class MissionControl(Node):
 
     def time_in_state(self) -> float:
         return self.now() - self.state_since
+
+    def send_gripper(self, elev: float, right: float, left: float):
+        """Publica um comando para a garra na ordem do controlador do professor:
+        [elevacao_haste, braco_direito, braco_esquerdo]."""
+        msg = Float64MultiArray()
+        msg.data = [float(elev), float(right), float(left)]
+        self.gripper_pub.publish(msg)
+
+    def open_gripper(self, elev: float):
+        """Abre os dois bracos, mantendo a haste na elevacao dada."""
+        self.send_gripper(elev, self.p.grip_open_right, self.p.grip_open_left)
+
+    def close_gripper(self, elev: float):
+        """Fecha os dois bracos (prende o mastro), na elevacao dada."""
+        self.send_gripper(elev, self.p.grip_closed_right, self.p.grip_closed_left)
 
     @property
     def flag_visible(self) -> bool:
@@ -225,6 +251,11 @@ class MissionControl(Node):
             self.yaw = R.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz')[2]
         except ValueError:
             pass
+        # Guarda a primeira pose como referencia da base (centro do circulo de
+        # deposito), conforme permite o enunciado do Trabalho 2.
+        if self.start_x is None:
+            self.start_x = self.x
+            self.start_y = self.y
         self.have_odom = True
 
     def _update_stuck_history(self):
@@ -388,6 +419,37 @@ class MissionControl(Node):
         twist.linear.x = speed
         return twist
 
+    def _plan_follow_to(self, goal) -> Twist:
+        """Como _plan_follow_twist, mas planeja A estrela ate um PONTO absoluto
+        (x, y) do mundo, e nao um ponto a frente numa direcao. Usado no retorno
+        a base, cujo destino e a pose inicial gravada."""
+        now = self.now()
+        if not self.path or now - self.last_plan_time > self.p.replan_period:
+            self.path = self.gplanner.plan((self.x, self.y), goal)
+            self.path_goal = goal
+            self.last_plan_time = now
+
+        if not self.path:
+            direction = math.atan2(goal[1] - self.y, goal[0] - self.x)
+            return self._reactive_twist(direction)
+
+        while (len(self.path) > 1 and
+               math.hypot(self.path[0][0] - self.x,
+                          self.path[0][1] - self.y) < self.p.waypoint_tolerance):
+            self.path.pop(0)
+        wx, wy = self.path[0]
+        yaw_err = nav.wrap_to_pi(math.atan2(wy - self.y, wx - self.x) - self.yaw)
+
+        twist = Twist()
+        twist.angular.z = nav.clamp(self.p.goto_angular_kp * yaw_err,
+                                    -self.p.nav_max_angular_speed,
+                                    self.p.nav_max_angular_speed)
+        speed = self.p.nav_linear_speed * max(0.2, 1.0 - abs(yaw_err) / 1.2)
+        if self.front_distance() <= self.p.emergency_stop_distance:
+            speed = 0.0
+        twist.linear.x = speed
+        return twist
+
     # ====================================================================== #
     # Loop principal: despacha o handler do estado atual
     # ====================================================================== #
@@ -408,7 +470,8 @@ class MissionControl(Node):
         # potencial e de encravamentos entre cilindros, valendo tanto na
         # exploracao quanto na navegacao ate a bandeira.
         self._update_stuck_history()
-        if self.state in (State.EXPLORANDO, State.NAVEGANDO_PARA_BANDEIRA):
+        if self.state in (State.EXPLORANDO, State.NAVEGANDO_PARA_BANDEIRA,
+                          State.RETORNANDO_PARA_BASE):
             escape = self._maybe_escape()
             if escape is not None:
                 self.cmd_pub.publish(escape)
@@ -421,6 +484,10 @@ class MissionControl(Node):
             State.BANDEIRA_DETECTADA: self.st_bandeira_detectada,
             State.NAVEGANDO_PARA_BANDEIRA: self.st_navegando,
             State.POSICIONANDO_PARA_COLETA: self.st_posicionando,
+            State.CAPTURANDO_BANDEIRA: self.st_capturando,
+            State.RETORNANDO_PARA_BASE: self.st_retornando,
+            State.POSICIONANDO_PARA_DEPOSITO: self.st_posicionando_deposito,
+            State.DEPOSITANDO_BANDEIRA: self.st_depositando,
             State.REDETECTANDO_BANDEIRA: self.st_redetectando,
             State.MISSAO_CONCLUIDA: self.st_concluida,
         }
@@ -498,8 +565,10 @@ class MissionControl(Node):
 
     # ---------------------------------------------------------------------- #
     # ESTADO: POSICIONANDO_PARA_COLETA
-    # Ajuste fino: centraliza a bandeira (offset~0) e para na distancia
-    # desejada (medida pelo LIDAR frontal). Conclui a missao quando alinhado.
+    # Alinha o robo com o mastro da bandeira e avanca reto ate ela ficar bem
+    # perto (area grande na imagem), em posicao de pega. Usa "girar entao
+    # avancar" com zona morta, evitando o vai-e-vem pendular. Quando alinhado e
+    # perto o suficiente, passa para a CAPTURA.
     # ---------------------------------------------------------------------- #
     def st_posicionando(self) -> Twist:
         if self.time_since_seen() > self.p.detect_lost_timeout:
@@ -507,38 +576,140 @@ class MissionControl(Node):
             return Twist()
 
         centered = abs(self.flag_offset) < self.p.centering_tolerance
-        # "Perto o suficiente" = bandeira grande na imagem (sinal visual robusto;
-        # o mastro fino e pouco confiavel no LIDAR a distancia).
-        flag_close = self.flag_area >= self.p.complete_area_ratio
+        ready_to_grab = self.flag_area >= self.p.grasp_area_ratio
         front = self.front_distance()
+        # Nao consegue mais avancar (algo, tipicamente a propria bandeira, esta
+        # na distancia critica): tambem serve de gatilho para nao travar aqui.
+        cant_advance = front <= self.p.emergency_stop_distance
 
-        if centered and flag_close:
+        if centered and (ready_to_grab or cant_advance):
             self.get_logger().info(
-                f'Posicionado! area={self.flag_area:.3f}, '
+                f'Em posicao de pega! area={self.flag_area:.3f}, '
                 f'offset={self.flag_offset:+.3f}, dist_frontal={front:.2f} m. '
-                'Missao concluida.')
-            self.transition_to(State.MISSAO_CONCLUIDA)
+                'Iniciando captura.')
+            self.transition_to(State.CAPTURANDO_BANDEIRA)
             return Twist()
 
-        # Se ha um obstaculo ENTRE o robo e a bandeira (algo perto a frente, mas
-        # a bandeira ainda nao esta grande/perto), contorna por A estrela em vez
-        # de avancar reto contra o cilindro.
-        if not flag_close and self.is_blocked(self.read_sectors()):
-            flag_dir = self.yaw - self.flag_offset * (CAMERA_H_FOV / 2.0)
-            return self._plan_follow_twist(flag_dir)
+        twist = Twist()
+        if not centered:
+            # Gira para mirar no mastro, SEM avancar (alinha primeiro).
+            twist.angular.z = nav.clamp(
+                -self.p.position_angular_kp * self.flag_offset,
+                -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
+        elif front > self.p.emergency_stop_distance:
+            # Mirado: avanca reto e devagar ate a bandeira ficar grande.
+            twist.linear.x = nav.clamp(self.p.position_linear_kp * 0.4,
+                                       0.0, self.p.nav_linear_speed)
+        return twist
+
+    # ---------------------------------------------------------------------- #
+    # ESTADO: CAPTURANDO_BANDEIRA
+    # Sequencia temporizada da garra (por atrito): abaixa a haste na altura do
+    # mastro e abre os bracos, avanca o pouco que falta para enfiar o mastro
+    # entre os bracos, fecha os bracos prendendo o mastro e eleva a haste para
+    # transportar. Robo so anda na etapa de avanco; nas demais fica parado.
+    # ---------------------------------------------------------------------- #
+    def st_capturando(self) -> Twist:
+        p = self.p
+        t = self.time_in_state()
+        t_settle = p.capture_settle_time
+        t_creep = t_settle + p.capture_creep_time
+        t_close = t_creep + p.capture_close_time
+        t_raise = t_close + p.capture_raise_time
 
         twist = Twist()
-        # Centralizacao fina da bandeira.
-        twist.angular.z = nav.clamp(
-            -self.p.position_angular_kp * self.flag_offset,
-            -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
-        # Aproxima-se enquanto a bandeira nao esta perto, com seguranca do LIDAR
-        # (nao avanca se houver algo a distancia critica). Avanca menos quando
-        # ainda nao esta centralizada (alinha primeiro, depois avanca).
-        if not flag_close and front > self.p.emergency_stop_distance:
-            approach = self.p.position_linear_kp * 0.4
-            approach *= max(0.0, 1.0 - abs(self.flag_offset) / 0.5)
-            twist.linear.x = nav.clamp(approach, 0.0, self.p.nav_linear_speed)
+        if t < t_settle:
+            # Abaixa a haste na altura do mastro e abre os bracos.
+            self.open_gripper(p.grip_capture_elev)
+        elif t < t_creep:
+            # Avanca devagar para enfiar o mastro entre os bracos abertos.
+            self.open_gripper(p.grip_capture_elev)
+            twist.linear.x = p.capture_creep_speed
+        elif t < t_close:
+            # Fecha os bracos, prendendo o mastro por atrito.
+            self.close_gripper(p.grip_capture_elev)
+        elif t < t_raise:
+            # Eleva a haste com a bandeira presa, pronto para transportar.
+            self.close_gripper(p.grip_carry_elev)
+        else:
+            self.get_logger().info('Bandeira capturada. Retornando a base.')
+            self.transition_to(State.RETORNANDO_PARA_BASE)
+        return twist
+
+    # ---------------------------------------------------------------------- #
+    # ESTADO: RETORNANDO_PARA_BASE
+    # Mantem a bandeira presa e elevada e planeja por A estrela ate a pose
+    # inicial (centro da base vermelha), contornando obstaculos pela grade do
+    # LIDAR. Ao chegar perto da base, passa ao posicionamento de deposito.
+    # ---------------------------------------------------------------------- #
+    def st_retornando(self) -> Twist:
+        # Mantem o mastro preso e elevado durante todo o transporte.
+        self.close_gripper(self.p.grip_carry_elev)
+
+        if self.start_x is None:
+            return Twist()  # sem referencia de base ainda
+
+        dist = math.hypot(self.start_x - self.x, self.start_y - self.y)
+        if dist <= self.p.deposit_tolerance:
+            self.transition_to(State.POSICIONANDO_PARA_DEPOSITO)
+            return Twist()
+
+        return self._plan_follow_to((self.start_x, self.start_y))
+
+    # ---------------------------------------------------------------------- #
+    # ESTADO: POSICIONANDO_PARA_DEPOSITO
+    # Ajuste fino sobre o ponto de deposito (a pose inicial, dentro do circulo
+    # amarelo). Aproxima-se do centro da base ate ficar bem dentro da tolerancia
+    # e entao deposita.
+    # ---------------------------------------------------------------------- #
+    def st_posicionando_deposito(self) -> Twist:
+        self.close_gripper(self.p.grip_carry_elev)
+        if self.start_x is None:
+            return Twist()
+
+        dx = self.start_x - self.x
+        dy = self.start_y - self.y
+        dist = math.hypot(dx, dy)
+        if dist <= self.p.deposit_tolerance * 0.6:
+            self.get_logger().info(
+                f'Sobre o ponto de deposito (a {dist:.2f} m do centro da base). '
+                'Depositando a bandeira.')
+            self.transition_to(State.DEPOSITANDO_BANDEIRA)
+            return Twist()
+
+        # Vira para o ponto de deposito e avanca ate o centro.
+        yaw_err = nav.wrap_to_pi(math.atan2(dy, dx) - self.yaw)
+        twist = Twist()
+        twist.angular.z = nav.clamp(self.p.goto_angular_kp * yaw_err,
+                                    -self.p.nav_max_angular_speed,
+                                    self.p.nav_max_angular_speed)
+        if abs(yaw_err) < 0.2:
+            twist.linear.x = nav.clamp(self.p.position_linear_kp * 0.4,
+                                       0.0, self.p.nav_linear_speed)
+        return twist
+
+    # ---------------------------------------------------------------------- #
+    # ESTADO: DEPOSITANDO_BANDEIRA
+    # Abre a garra para soltar a bandeira no circulo amarelo e recua um pouco
+    # para nao reencostar nela nem derruba-la. Em seguida, missao concluida.
+    # ---------------------------------------------------------------------- #
+    def st_depositando(self) -> Twist:
+        p = self.p
+        t = self.time_in_state()
+        t_release = p.deposit_release_time
+        t_backup = t_release + p.deposit_backup_time
+
+        twist = Twist()
+        if t < t_release:
+            # Abaixa a haste e abre os bracos para liberar a bandeira no chao.
+            self.open_gripper(p.grip_capture_elev)
+        elif t < t_backup:
+            # Recua um pouco com a garra aberta para nao reencostar na bandeira.
+            self.open_gripper(p.grip_capture_elev)
+            twist.linear.x = -p.deposit_backup_speed
+        else:
+            self.get_logger().info('Bandeira depositada na base. Missao concluida.')
+            self.transition_to(State.MISSAO_CONCLUIDA)
         return twist
 
     # ---------------------------------------------------------------------- #

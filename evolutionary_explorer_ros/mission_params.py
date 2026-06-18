@@ -97,6 +97,37 @@ class MissionParams:
     centering_tolerance: float = 0.06     # offset normalizado considerado centrado
 
     # ------------------------------------------------------------------ #
+    # Garra e captura da bandeira (Trabalho 2)
+    # ------------------------------------------------------------------ #
+    # Poses da garra publicadas em /gripper_controller/commands, NA ORDEM do
+    # controlador do professor: [elevacao_haste, braco_DIREITO, braco_ESQUERDO].
+    # Faixas: elevacao -1.57..0.2 rad; direito -0.06..0; esquerdo 0..0.06.
+    grip_capture_elev: float = 0.0     # haste na altura do mastro p/ agarrar
+    grip_open_right: float = -0.06     # braco direito aberto
+    grip_open_left: float = 0.06       # braco esquerdo aberto
+    grip_closed_right: float = 0.0     # braco direito fechado (prende o mastro)
+    grip_closed_left: float = 0.0      # braco esquerdo fechado
+    grip_carry_elev: float = -0.4      # haste ao transportar (segura o mastro)
+    # Area da bandeira na imagem para iniciar a captura (bandeira BEM perto).
+    grasp_area_ratio: float = 0.05
+    # Sequencia temporizada da captura (segundos de cada etapa).
+    capture_settle_time: float = 1.5   # haste desce e bracos abrem
+    capture_creep_time: float = 3.5    # avanca devagar enfiando o mastro
+    capture_creep_speed: float = 0.08  # m/s no avanco de captura
+    capture_close_time: float = 1.5    # fecha os bracos no mastro
+    capture_raise_time: float = 1.5    # eleva a haste com a bandeira presa
+
+    # ------------------------------------------------------------------ #
+    # Retorno a base e deposito (Trabalho 2)
+    # ------------------------------------------------------------------ #
+    # O robo nasce sobre o centro da base; usamos a pose inicial como destino
+    # do deposito, dentro do circulo amarelo demarcado.
+    deposit_tolerance: float = 0.5     # m: raio ao redor da pose inicial p/ depositar
+    deposit_release_time: float = 1.5  # s abrindo a garra p/ soltar a bandeira
+    deposit_backup_time: float = 2.0   # s recuando apos soltar p/ nao reencostar
+    deposit_backup_speed: float = 0.12 # m/s no recuo
+
+    # ------------------------------------------------------------------ #
     # Navegacao planejada por A estrela sobre a grade construida pelo LIDAR.
     # O robo NAO conhece os obstaculos de antemao: ele monta a grade enquanto
     # explora. A estrela planeja uma rota livre ate um ponto a frente, na
