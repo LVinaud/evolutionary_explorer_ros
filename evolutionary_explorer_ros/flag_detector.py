@@ -44,20 +44,34 @@ class FlagDetector(Node):
         super().__init__('flag_detector')
 
         # ---- Parametros (ver config/mission_params.yaml) ----
-        self.declare_parameter('target_label', 25)
-        self.declare_parameter('detection_mode', 'labels')  # "labels" | "color"
-        self.declare_parameter('target_color_b', 171)
-        self.declare_parameter('target_color_g', 242)
-        self.declare_parameter('target_color_r', 0)
+        # Trabalho 2: a deteccao passou a ser por COR na camera RGB comum
+        # (/rgb_cam). A bandeira azul inimiga tem a mascara RGB 0,73,227 dada no
+        # enunciado. Em vez de casar a cor exata (fragil sob iluminacao), usamos
+        # uma faixa em HSV em torno do azul, robusta a variacoes de brilho.
+        self.declare_parameter('detection_mode', 'color')      # "color" | "labels"
+        self.declare_parameter('image_topic', '/rgb_cam')      # camera RGB do T2
+        self.declare_parameter('target_label', 25)             # usado no modo labels
+        # Faixa HSV (OpenCV: H 0-179) que isola o azul da bandeira. O azul do
+        # mastro/painel cai em torno de H=110. A parede externa (RGB 0,154,114)
+        # e esverdeada (H~82) e fica de fora desta faixa.
+        self.declare_parameter('hue_min', 100)
+        self.declare_parameter('hue_max', 130)
+        self.declare_parameter('sat_min', 80)
+        self.declare_parameter('val_min', 50)
         self.declare_parameter('min_blob_area', 10)
         self.declare_parameter('publish_debug_image', True)
 
-        self.target_label = int(self.get_parameter('target_label').value)
         self.detection_mode = str(self.get_parameter('detection_mode').value).lower()
-        self.target_color = np.array([
-            int(self.get_parameter('target_color_b').value),
-            int(self.get_parameter('target_color_g').value),
-            int(self.get_parameter('target_color_r').value),
+        self.image_topic = str(self.get_parameter('image_topic').value)
+        self.target_label = int(self.get_parameter('target_label').value)
+        self.hsv_low = np.array([
+            int(self.get_parameter('hue_min').value),
+            int(self.get_parameter('sat_min').value),
+            int(self.get_parameter('val_min').value),
+        ], dtype=np.uint8)
+        self.hsv_high = np.array([
+            int(self.get_parameter('hue_max').value),
+            255, 255,
         ], dtype=np.uint8)
         self.min_blob_area = int(self.get_parameter('min_blob_area').value)
         self.publish_debug = bool(self.get_parameter('publish_debug_image').value)
@@ -70,23 +84,29 @@ class FlagDetector(Node):
         self.pub_area = self.create_publisher(Float32, '/flag/area_ratio', 10)
         self.pub_debug = self.create_publisher(Image, '/flag/debug_image', 1)
 
-        # ---- Subscriber (apenas o mapa do modo escolhido) ----
+        # ---- Subscriber (topico conforme o modo escolhido) ----
         if self.detection_mode == 'color':
-            topic = '/robot_cam/colored_map'
+            topic = self.image_topic
         else:
             topic = '/robot_cam/labels_map'
         self.create_subscription(Image, topic, self.image_callback, 10)
 
         self.get_logger().info(
             f"flag_detector iniciado | modo='{self.detection_mode}' | "
-            f"topico='{topic}' | target_label={self.target_label}")
+            f"topico='{topic}' | HSV={self.hsv_low.tolist()}..{self.hsv_high.tolist()} | "
+            f"target_label={self.target_label}")
 
     # ------------------------------------------------------------------ #
     def _build_mask(self, msg: Image):
         """Retorna (mask uint8 0/255, frame_bgr_para_debug)."""
         if self.detection_mode == 'color':
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            mask = cv2.inRange(frame, self.target_color, self.target_color)
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, self.hsv_low, self.hsv_high)
+            # Limpa ruido e fecha pequenos buracos no blob da bandeira.
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
             return mask, frame
 
         # modo "labels": cada pixel carrega o ID da label.

@@ -59,27 +59,26 @@ mission_control:
 
 flag_detector:
   ros__parameters:
-    # Label da bandeira INIMIGA na camera de segmentacao semantica.
-    # No mundo arena_cilindros: red_flag=20, blue_flag=25. O robo nasce no
-    # lado vermelho, logo a bandeira inimiga e a AZUL (label 25).
+    # Trabalho 2: deteccao da bandeira inimiga AZUL por COR, na camera RGB
+    # comum. O enunciado fornece a mascara RGB 0,73,227 para a bandeira azul.
+    #   "color"  -> usa a imagem RGB (image_topic) e uma faixa HSV do azul.
+    #   "labels" -> usa /robot_cam/labels_map (camera de segmentacao do T1).
+    detection_mode: "color"
+    image_topic: "/rgb_cam"
+
+    # Faixa HSV (OpenCV: H 0-179) que isola o azul da bandeira. H~110 e o azul
+    # da bandeira; a parede externa (RGB 0,154,114) e esverdeada (H~82) e fica
+    # fora desta faixa. Ajuste fino se a iluminacao deslocar a cor.
+    hue_min: 100
+    hue_max: 130
+    sat_min: 80
+    val_min: 50
+
+    # Label da bandeira inimiga, usada apenas no modo "labels" (reserva).
     target_label: 25
 
-    # Modo de deteccao:
-    #   "labels" -> usa /robot_cam/labels_map (valor do pixel == id da label).
-    #               Robusto: nao depende de calibrar cor.
-    #   "color"  -> usa /robot_cam/colored_map e procura uma cor BGR exata.
-    detection_mode: "labels"
-
-    # Cor BGR usada apenas no modo "color" (fallback). Calibrar inspecionando
-    # /robot_cam/colored_map. O valor abaixo e o exemplo de obstaculo das aulas
-    # (RGB 0,242,171 == BGR 171,242,0) e deve ser trocado pela cor da bandeira.
-    target_color_b: 171
-    target_color_g: 242
-    target_color_r: 0
-
     # Area minima do blob (contourArea, em px) para considerar a bandeira
-    # detectada. Calibrado em simulacao: 20 detecta a bandeira azul ja de longe
-    # (~6 m) de forma mais estavel; so a bandeira tem label 25, sem falso positivo.
+    # detectada.
     min_blob_area: 10
 
     # Publica /flag/debug_image com a deteccao desenhada (depuracao no rqt/RViz).
