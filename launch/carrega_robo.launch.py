@@ -75,19 +75,17 @@ def generate_launch_description():
     # Preparação do sistema de controle das rodas do robô
     # ------------------------------------------------------
 
-    # Inicialização do sistema de controle das juntas do robo
-    # leitura do estado delas...
-    load_joint_state_controller = ExecuteProcess(
-        name="activate_joint_state_broadcaster",
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "active",
-            "joint_state_broadcaster",
-        ],
-        shell=False,
+    # Inicialização do sistema de controle das juntas do robo (leitura do
+    # estado delas). Usamos o spawner do controller_manager, que aguarda o
+    # servico e tem novas tentativas embutidas, em vez de um load_controller
+    # de uma so chamada (fragil quando o controller_manager esta lento, como
+    # no modo headless ou em VM sem GPU).
+    load_joint_state_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        name="spawner_joint_state_broadcaster",
+        arguments=["joint_state_broadcaster"],
+        parameters=[diff_drive_params],
         output="screen",
     )
 
@@ -192,13 +190,13 @@ def generate_launch_description():
         arguments=[
             "/scan@sensor_msgs/msg/LaserScan@ignition.msgs.LaserScan",
             "/imu@sensor_msgs/msg/Imu@ignition.msgs.IMU",
-            # Camera normal
-            # "/robot_cam@sensor_msgs/msg/Image@ignition.msgs.Image",
-            # "/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
-            # Camera de segmentacao semantica
-            "/robot_cam/labels_map@sensor_msgs/msg/Image@ignition.msgs.Image",
-            "/robot_cam/colored_map@sensor_msgs/msg/Image@ignition.msgs.Image",
-            "/robot_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",            
+            # Camera RGB comum (Trabalho 2): usada na deteccao por cor.
+            "/rgb_cam@sensor_msgs/msg/Image@ignition.msgs.Image",
+            "/rgb_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
+            # Camera de segmentacao semantica (T1) desativada no T2:
+            # "/robot_cam/labels_map@sensor_msgs/msg/Image@ignition.msgs.Image",
+            # "/robot_cam/colored_map@sensor_msgs/msg/Image@ignition.msgs.Image",
+            # "/robot_cam/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",
             # Camera de detectao bounding box
             # "/boxes_visible_2d_image@sensor_msgs/msg/Image@ignition.msgs.Image",
             # "/camera_info@sensor_msgs/msg/CameraInfo@ignition.msgs.CameraInfo",

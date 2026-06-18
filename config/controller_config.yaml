@@ -11,6 +11,14 @@ controller_manager:
     gripper_controller:
       type: position_controllers/JointGroupPositionController
 
+# Ordem das juntas igual a do repositorio base do professor (prm_2026), para
+# que os comandos de exemplo do enunciado funcionem exatamente como descritos:
+#   data[0] = elevacao da haste (gripper_extension), em radianos
+#   data[1] = abertura do braco DIREITO (right_gripper_joint), faixa -0.06..0
+#   data[2] = abertura do braco ESQUERDO (left_gripper_joint), faixa 0..0.06
+# Observacao: a tabela do PDF rotula data[1] como esquerdo e data[2] como
+# direito, mas os exemplos de comando do proprio enunciado seguem esta ordem
+# (direito, esquerdo), que e a do controller_config do professor.
 gripper_controller:
   ros__parameters:
     joints:
