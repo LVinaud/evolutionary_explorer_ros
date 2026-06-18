@@ -94,6 +94,7 @@ class MissionParams:
     target_stop_distance: float = 0.6     # m: dist. frontal de referencia/seguranca
     position_linear_kp: float = 0.6       # ganho da velocidade de aproximacao
     position_angular_kp: float = 2.0      # ganho P de centralizacao fina
+    position_steer_kp: float = 1.2        # ganho de esterco na perseguicao suave
     centering_tolerance: float = 0.06     # offset normalizado considerado centrado
 
     # ------------------------------------------------------------------ #

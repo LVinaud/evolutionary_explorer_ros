@@ -590,16 +590,18 @@ class MissionControl(Node):
             self.transition_to(State.CAPTURANDO_BANDEIRA)
             return Twist()
 
+        # Perseguicao suave: gira proporcional ao deslocamento da bandeira E
+        # avanca ao mesmo tempo, reduzindo a velocidade quanto mais descentralizado
+        # (em vez de "gira-entao-anda", que gera o vai-e-vem pendular). Para o
+        # avanco se houver algo na distancia critica (a propria bandeira perto).
         twist = Twist()
-        if not centered:
-            # Gira para mirar no mastro, SEM avancar (alinha primeiro).
-            twist.angular.z = nav.clamp(
-                -self.p.position_angular_kp * self.flag_offset,
-                -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
-        elif front > self.p.emergency_stop_distance:
-            # Mirado: avanca reto e devagar ate a bandeira ficar grande.
-            twist.linear.x = nav.clamp(self.p.position_linear_kp * 0.4,
-                                       0.0, self.p.nav_linear_speed)
+        twist.angular.z = nav.clamp(
+            -self.p.position_steer_kp * self.flag_offset,
+            -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
+        if front > self.p.emergency_stop_distance:
+            slow = max(0.3, 1.0 - abs(self.flag_offset) / 0.4)
+            speed = self.p.position_linear_kp * slow
+            twist.linear.x = nav.clamp(speed, 0.0, self.p.nav_linear_speed)
         return twist
 
     # ---------------------------------------------------------------------- #
