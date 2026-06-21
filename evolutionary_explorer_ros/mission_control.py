@@ -711,10 +711,16 @@ class MissionControl(Node):
         dx = self.start_x - self.x
         dy = self.start_y - self.y
         dist = math.hypot(dx, dy)
-        if dist <= self.p.deposit_tolerance * 0.6:
+        # Deposita quando chega perto do centro OU apos um tempo tentando: o robo
+        # ja entrou aqui dentro do circulo de deposito (raio deposit_tolerance),
+        # entao nao vale a pena insistir no centro exato se a borda do disco ou
+        # cilindros perto da base impedem o ajuste fino. O tempo limite evita
+        # ficar preso para sempre tentando centralizar.
+        if (dist <= self.p.deposit_tolerance * 0.6 or
+                self.time_in_state() > self.p.deposit_align_timeout):
             self.get_logger().info(
-                f'Sobre o ponto de deposito (a {dist:.2f} m do centro da base). '
-                'Depositando a bandeira.')
+                f'Sobre o ponto de deposito (a {dist:.2f} m do centro da base, '
+                f't={self.time_in_state():.1f} s). Depositando a bandeira.')
             self.transition_to(State.DEPOSITANDO_BANDEIRA)
             return Twist()
 

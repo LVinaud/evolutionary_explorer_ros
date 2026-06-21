@@ -71,6 +71,7 @@ mission_control:
 
     # ---- Retorno e deposito (Trabalho 2) ----
     deposit_tolerance: 0.5        # m: raio ao redor da pose inicial p/ depositar
+    deposit_align_timeout: 8.0    # s tentando centralizar antes de depositar mesmo assim
     deposit_release_time: 1.5     # s abrindo a garra p/ soltar
     deposit_backup_time: 2.0      # s recuando apos soltar
     deposit_backup_speed: 0.12    # m/s no recuo

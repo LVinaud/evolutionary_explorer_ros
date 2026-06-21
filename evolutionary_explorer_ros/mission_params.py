@@ -134,6 +134,7 @@ class MissionParams:
     # O robo nasce sobre o centro da base; usamos a pose inicial como destino
     # do deposito, dentro do circulo amarelo demarcado.
     deposit_tolerance: float = 0.5     # m: raio ao redor da pose inicial p/ depositar
+    deposit_align_timeout: float = 8.0  # s tentando centralizar antes de depositar mesmo assim
     deposit_release_time: float = 1.5  # s abrindo a garra p/ soltar a bandeira
     deposit_backup_time: float = 2.0   # s recuando apos soltar p/ nao reencostar
     deposit_backup_speed: float = 0.12 # m/s no recuo
