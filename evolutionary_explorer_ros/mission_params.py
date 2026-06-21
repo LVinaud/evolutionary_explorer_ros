@@ -109,6 +109,11 @@ class MissionParams:
     grip_closed_right: float = 0.0     # braco direito fechado (prende o mastro)
     grip_closed_left: float = 0.0      # braco esquerdo fechado
     grip_carry_elev: float = -0.4      # haste ao transportar (segura o mastro)
+    # Vies lateral de mira na captura: o centro do blob azul (mastro + painel)
+    # fica puxado para o lado do painel, entao o robo mira ao lado do mastro.
+    # Este vies, somado ao deslocamento medido, corrige a mira para o mastro.
+    # Positivo mira mais para a direita; ajustar o sinal/valor olhando a captura.
+    grasp_aim_bias: float = 0.12
     # Area da bandeira na imagem para iniciar a captura (bandeira BEM perto).
     grasp_area_ratio: float = 0.05
     # Sequencia temporizada da captura (segundos de cada etapa).

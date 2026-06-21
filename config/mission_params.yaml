@@ -49,7 +49,30 @@ mission_control:
     target_stop_distance: 0.6    # m: referencia/seguranca
     position_linear_kp: 0.6
     position_angular_kp: 2.0
+    position_steer_kp: 1.2        # ganho de esterco na perseguicao suave
     centering_tolerance: 0.06
+
+    # ---- Garra e captura (Trabalho 2) ----
+    # Poses na ordem do controlador do professor: [elevacao, direito, esquerdo].
+    grip_capture_elev: 0.0        # angulo da haste p/ agarrar (-1.57 a 0.2)
+    grip_open_right: -0.06        # braco direito aberto
+    grip_open_left: 0.06          # braco esquerdo aberto
+    grip_closed_right: 0.0        # braco direito fechado
+    grip_closed_left: 0.0         # braco esquerdo fechado
+    grip_carry_elev: -0.4         # haste ao transportar
+    grasp_aim_bias: 0.12          # vies lateral p/ mirar no mastro (nao no painel)
+    grasp_area_ratio: 0.05        # area p/ iniciar a captura (bem perto)
+    capture_settle_time: 1.5      # s p/ abaixar e abrir
+    capture_creep_time: 3.5       # s avancando p/ enfiar o mastro
+    capture_creep_speed: 0.08     # m/s no avanco de captura
+    capture_close_time: 1.5       # s p/ fechar os bracos
+    capture_raise_time: 1.5       # s p/ elevar com a bandeira
+
+    # ---- Retorno e deposito (Trabalho 2) ----
+    deposit_tolerance: 0.5        # m: raio ao redor da pose inicial p/ depositar
+    deposit_release_time: 1.5     # s abrindo a garra p/ soltar
+    deposit_backup_time: 2.0      # s recuando apos soltar
+    deposit_backup_speed: 0.12    # m/s no recuo
 
     # ---- Deteccao / transicoes ----
     detect_confirm_frames: 1

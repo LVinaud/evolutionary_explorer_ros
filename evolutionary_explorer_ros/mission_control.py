@@ -575,7 +575,10 @@ class MissionControl(Node):
             self.transition_to(State.REDETECTANDO_BANDEIRA)
             return Twist()
 
-        centered = abs(self.flag_offset) < self.p.centering_tolerance
+        # Mira no MASTRO, nao no centro do blob: o painel desloca o centro do
+        # blob para o seu lado, entao corrigimos com um vies lateral.
+        aim_offset = self.flag_offset + self.p.grasp_aim_bias
+        centered = abs(aim_offset) < self.p.centering_tolerance
         ready_to_grab = self.flag_area >= self.p.grasp_area_ratio
         front = self.front_distance()
         # Nao consegue mais avancar (algo, tipicamente a propria bandeira, esta
@@ -585,21 +588,21 @@ class MissionControl(Node):
         if centered and (ready_to_grab or cant_advance):
             self.get_logger().info(
                 f'Em posicao de pega! area={self.flag_area:.3f}, '
-                f'offset={self.flag_offset:+.3f}, dist_frontal={front:.2f} m. '
-                'Iniciando captura.')
+                f'offset={self.flag_offset:+.3f} (mira={aim_offset:+.3f}), '
+                f'dist_frontal={front:.2f} m. Iniciando captura.')
             self.transition_to(State.CAPTURANDO_BANDEIRA)
             return Twist()
 
-        # Perseguicao suave: gira proporcional ao deslocamento da bandeira E
-        # avanca ao mesmo tempo, reduzindo a velocidade quanto mais descentralizado
-        # (em vez de "gira-entao-anda", que gera o vai-e-vem pendular). Para o
-        # avanco se houver algo na distancia critica (a propria bandeira perto).
+        # Perseguicao suave: gira proporcional ao deslocamento (ja corrigido para
+        # o mastro) E avanca ao mesmo tempo, reduzindo a velocidade quanto mais
+        # descentralizado (em vez de "gira-entao-anda", que gera o vai-e-vem
+        # pendular). Para o avanco se houver algo na distancia critica.
         twist = Twist()
         twist.angular.z = nav.clamp(
-            -self.p.position_steer_kp * self.flag_offset,
+            -self.p.position_steer_kp * aim_offset,
             -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
         if front > self.p.emergency_stop_distance:
-            slow = max(0.3, 1.0 - abs(self.flag_offset) / 0.4)
+            slow = max(0.3, 1.0 - abs(aim_offset) / 0.4)
             speed = self.p.position_linear_kp * slow
             twist.linear.x = nav.clamp(speed, 0.0, self.p.nav_linear_speed)
         return twist
