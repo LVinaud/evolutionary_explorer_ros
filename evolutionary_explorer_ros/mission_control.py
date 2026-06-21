@@ -135,6 +135,9 @@ class MissionControl(Node):
         # Pose inicial (centro da base vermelha): referencia do deposito (T2).
         self.start_x = None
         self.start_y = None
+        # True enquanto a bandeira esta presa na garra (transporte): faz o robo
+        # ignorar a propria bandeira nas leituras do LIDAR.
+        self.carrying = False
         self.pos_history = deque()        # historico (t, x, y) p/ detectar travamento
         self.escape_until = 0.0           # tempo ate o qual executa manobra de escape
         self.escape_turn_dir = 1.0        # sentido do giro de escape
@@ -212,11 +215,14 @@ class MissionControl(Node):
         self.scan = msg
         # Constroi a grade de ocupacao a partir do LIDAR (so com pose valida).
         # Ignora retornos muito proximos para nao mapear o proprio robo/garra.
+        # Ao carregar a bandeira, ignora ainda mais perto para nao mapear o
+        # proprio mastro preso a frente como se fosse um obstaculo.
         if self.have_odom:
+            near = self.p.carry_blind_range if self.carrying else 0.35
             self.gplanner.update_from_scan(
                 self.x, self.y, self.yaw, msg.ranges,
                 msg.angle_min, msg.angle_increment,
-                max(msg.range_min, 0.35), msg.range_max)
+                max(msg.range_min, near), msg.range_max)
 
     def flag_detected_cb(self, msg: Bool):
         if msg.data:
@@ -327,6 +333,19 @@ class MissionControl(Node):
             s.ranges, s.angle_min, s.angle_increment,
             center_rad=0.0, half_width_rad=math.radians(12.0),
             range_min=s.range_min, range_max=s.range_max)
+
+    def front_clear_distance(self) -> float:
+        """Distancia frontal para a navegacao de retorno. Ao carregar a
+        bandeira, ignora os retornos mais proximos que carry_blind_range, que
+        sao o proprio mastro preso, para nao confundi-lo com uma parede."""
+        if self.scan is None:
+            return 99.0
+        s = self.scan
+        rmin = self.p.carry_blind_range if self.carrying else s.range_min
+        return nav.sector_min_distance(
+            s.ranges, s.angle_min, s.angle_increment,
+            center_rad=0.0, half_width_rad=math.radians(12.0),
+            range_min=rmin, range_max=s.range_max)
 
     def is_blocked(self, sectors: nav.ScanSectors) -> bool:
         """Ha obstaculo proximo a frente OU nas diagonais frontais?
@@ -444,9 +463,15 @@ class MissionControl(Node):
         twist.angular.z = nav.clamp(self.p.goto_angular_kp * yaw_err,
                                     -self.p.nav_max_angular_speed,
                                     self.p.nav_max_angular_speed)
-        speed = self.p.nav_linear_speed * max(0.2, 1.0 - abs(yaw_err) / 1.2)
-        if self.front_distance() <= self.p.emergency_stop_distance:
+        # Se o objetivo esta muito fora do rumo (tipico no retorno, que exige
+        # dar meia-volta), gira no lugar antes de avancar, em vez de sair
+        # avancando para o lado errado.
+        if abs(yaw_err) > self.p.turn_in_place_threshold:
             speed = 0.0
+        else:
+            speed = self.p.nav_linear_speed * max(0.2, 1.0 - abs(yaw_err) / 1.2)
+            if self.front_clear_distance() <= self.p.emergency_stop_distance:
+                speed = 0.0
         twist.linear.x = speed
         return twist
 
@@ -470,8 +495,10 @@ class MissionControl(Node):
         # potencial e de encravamentos entre cilindros, valendo tanto na
         # exploracao quanto na navegacao ate a bandeira.
         self._update_stuck_history()
-        if self.state in (State.EXPLORANDO, State.NAVEGANDO_PARA_BANDEIRA,
-                          State.RETORNANDO_PARA_BASE):
+        # A manobra de escape (recuar + girar) NAO roda no retorno: com a
+        # bandeira presa ela viraria res e giros erraticos. O retorno tem a
+        # propria logica de girar no lugar e contornar pela grade.
+        if self.state in (State.EXPLORANDO, State.NAVEGANDO_PARA_BANDEIRA):
             escape = self._maybe_escape()
             if escape is not None:
                 self.cmd_pub.publish(escape)
@@ -637,6 +664,7 @@ class MissionControl(Node):
             # Eleva a haste com a bandeira presa, pronto para transportar.
             self.close_gripper(p.grip_carry_elev)
         else:
+            self.carrying = True  # a partir daqui o LIDAR deve ignorar o mastro
             self.get_logger().info('Bandeira capturada. Retornando a base.')
             self.transition_to(State.RETORNANDO_PARA_BASE)
         return twist
@@ -707,6 +735,7 @@ class MissionControl(Node):
         twist = Twist()
         if t < t_release:
             # Abaixa a haste e abre os bracos para liberar a bandeira no chao.
+            self.carrying = False  # soltou: volta a enxergar o LIDAR normalmente
             self.open_gripper(p.grip_capture_elev)
         elif t < t_backup:
             # Recua um pouco com a garra aberta para nao reencostar na bandeira.

@@ -132,6 +132,11 @@ class MissionParams:
     deposit_release_time: float = 1.5  # s abrindo a garra p/ soltar a bandeira
     deposit_backup_time: float = 2.0   # s recuando apos soltar p/ nao reencostar
     deposit_backup_speed: float = 0.12 # m/s no recuo
+    # Ao transportar a bandeira presa, o LIDAR enxerga o proprio mastro logo a
+    # frente. Ignoramos os retornos mais proximos que isto (no mapa e na
+    # seguranca frontal) para o robo nao tratar a propria bandeira como parede.
+    carry_blind_range: float = 0.8     # m: alcance frontal ignorado ao carregar
+    turn_in_place_threshold: float = 0.7  # rad: acima disso, gira no lugar (nao avanca)
 
     # ------------------------------------------------------------------ #
     # Navegacao planejada por A estrela sobre a grade construida pelo LIDAR.
