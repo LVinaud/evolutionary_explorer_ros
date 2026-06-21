@@ -2,7 +2,9 @@
 
 ## Visão geral
 
-Este pacote ROS 2 implementa o sistema de controle de um robô móvel diferencial que explora um ambiente simulado, localiza a bandeira do time adversário por visão computacional, navega até ela desviando de obstáculos com o sensor LIDAR e se posiciona de frente para ela para a coleta. Todo o comportamento é coordenado por uma máquina de estados, que é o módulo central do trabalho. O projeto foi desenvolvido para a disciplina SSC0712 Programação de Robôs Móveis do ICMC USP e utiliza ROS 2 Humble com o simulador Gazebo Fortress.
+Este pacote ROS 2 implementa o sistema de controle de um robô móvel diferencial que explora um ambiente simulado, localiza a bandeira do time adversário por visão computacional, navega até ela desviando de obstáculos com o sensor LIDAR, captura a bandeira com o manipulador, transporta a bandeira de volta até a própria base e a deposita dentro do círculo amarelo demarcado. Todo o comportamento é coordenado por uma máquina de estados, que é o módulo central do trabalho. O projeto foi desenvolvido para a disciplina SSC0712 Programação de Robôs Móveis do ICMC USP e utiliza ROS 2 Humble com o simulador Gazebo Fortress.
+
+Este repositório atende ao Trabalho 1, que ia até localizar e se posicionar diante da bandeira, e ao Trabalho 2, que acrescenta a captura com a garra, o retorno à base e o depósito. A entrega do Trabalho 2 está na branch trabalho-2.
 
 O pacote deriva do pacote base da disciplina, disponível em github.com/matheusbg8/prm_2026. O robô, os sensores, os mundos e a infraestrutura de lançamento foram reaproveitados e adaptados. O pacote recebeu um nome próprio, o robô foi renomeado para explorer_robot e foram acrescentados os nós de percepção e de controle da missão, além de modificações de modelagem e estabilidade.
 
@@ -57,6 +59,14 @@ ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py software_render
 
 Apenas o lançamento do mundo precisa do argumento software_render, porque é ele que abre a janela do Gazebo. O lançamento da missão, descrito no passo 2, não precisa desse argumento. Como alternativa mais rápida, quando for possível alterar as configurações da máquina virtual, ative a aceleração de gráficos 3D nas opções de vídeo da máquina virtual e instale as ferramentas de integração do sistema convidado. Isso usa a GPU do hospedeiro e dispensa a renderização por software. Existe ainda o argumento headless com valor true, que executa o Gazebo sem janela gráfica, útil para testes automatizados e para a fase de computação evolutiva.
 
+O cenário é escolhido pelo argumento world. Sem ele, carrega o cenário padrão com obstáculos do Trabalho 1. Os três cenários de teste do Trabalho 2 são o mapa aberto e os mapas com obstáculos, e se iniciam assim.
+
+```
+ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py world:=empty_arena.sdf software_render:=1
+ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py world:=arena_cilindros.sdf software_render:=1
+ros2 launch evolutionary_explorer_ros inicia_simulacao.launch.py world:=arena_paredes.sdf software_render:=1
+```
+
 ### Passo 2, iniciar o robô e a missão
 
 No segundo terminal, depois que a arena terminar de abrir, carregue o robô e o controle autônomo da missão. Esse comando coloca o robô no mundo, sobe os sensores, estabelece a ponte entre o Gazebo e o ROS, abre o RViz, publica a odometria de referência e inicia os nós de percepção da bandeira e de controle da missão. O robô passa a explorar automaticamente.
@@ -83,7 +93,7 @@ ros2 topic echo /mission/state
 
 ### Argumentos úteis do lançamento da missão
 
-O lançamento da missão aceita argumentos que facilitam os testes. O argumento use_rviz com valor false desliga o RViz, o que deixa a execução mais leve. Os argumentos spawn_x, spawn_y, spawn_z e spawn_yaw definem a posição e a orientação iniciais do robô. O argumento params_file permite carregar um arquivo de parâmetros diferente, recurso pensado para a fase de computação evolutiva. O exemplo a seguir inicia o robô em uma posição mais próxima da bandeira adversária, o que permite observar a sequência completa de detecção, navegação e posicionamento em pouco tempo.
+O lançamento da missão aceita argumentos que facilitam os testes. O argumento use_rviz com valor false desliga o RViz, o que deixa a execução muito mais leve, porque o RViz é um segundo desenho 3D competindo com a renderização da câmera. Em máquina virtual sem aceleração de vídeo, desligar o RViz é o ajuste que mais acelera a simulação, e dá para acompanhar a missão pelos tópicos. Os argumentos spawn_x, spawn_y, spawn_z e spawn_yaw definem a posição e a orientação iniciais do robô. O argumento params_file permite carregar um arquivo de parâmetros diferente, recurso pensado para a fase de computação evolutiva. O exemplo a seguir inicia o robô em uma posição mais próxima da bandeira adversária, o que permite observar a sequência completa em pouco tempo.
 
 ```
 ros2 launch evolutionary_explorer_ros missao.launch.py spawn_x:=3.0
@@ -123,19 +133,35 @@ No estado BANDEIRA_DETECTADA o robô registra que a bandeira foi identificada vi
 
 No estado NAVEGANDO_PARA_BANDEIRA o robô estima a direção da bandeira a partir do deslocamento horizontal dela na imagem e do campo de visão da câmera e planeja por A estrela uma rota até um ponto naquela direção, sobre o mesmo mapa de ocupação construído pelo LIDAR. Dessa forma ele se aproxima da bandeira contornando os cilindros que aparecem no caminho em vez de avançar reto contra eles. Quando a bandeira ocupa uma fração suficiente da imagem, sinal de que está realmente perto, e está razoavelmente centralizada, o robô passa ao posicionamento. A transição usa a área da bandeira na imagem como critério, e não a distância frontal do LIDAR, porque um cilindro entre o robô e a bandeira seria confundido com a bandeira e faria o robô parar cedo demais.
 
-No estado POSICIONANDO_PARA_COLETA o robô faz o ajuste fino. Ele se aproxima centralizando a bandeira até que ela ocupe uma fração suficiente da imagem, o que indica proximidade adequada. Se durante essa aproximação houver um obstáculo entre o robô e a bandeira, o robô volta a planejar por A estrela na direção da bandeira e contorna o obstáculo, em vez de avançar reto contra ele. O LIDAR atua como segurança para evitar colisão. O critério de conclusão baseado na área da imagem foi escolhido porque o mastro da bandeira é fino e a leitura direta de distância pelo LIDAR sobre ele é pouco confiável.
+No estado POSICIONANDO_PARA_COLETA o robô faz o ajuste fino para a captura. Ele alinha o robô com o mastro da bandeira e avança ao mesmo tempo, numa perseguição suave que gira proporcional ao deslocamento da bandeira na imagem e reduz a velocidade quanto mais descentralizado, evitando o movimento pendular. Quando a bandeira fica grande na imagem, sinal de que está em posição de pega, e o robô está alinhado, ele passa para a captura. O LIDAR atua como segurança para evitar colisão.
+
+No estado CAPTURANDO_BANDEIRA o robô executa uma sequência temporizada do manipulador para agarrar a bandeira por atrito. Primeiro abaixa a haste na altura do mastro e abre os dois braços, depois avança devagar o pouco que falta para enfiar o mastro entre os braços, em seguida fecha os braços prendendo o mastro e por fim eleva a haste com a bandeira presa, pronto para transportar. Durante essa sequência o robô só se move na etapa de avanço.
+
+No estado RETORNANDO_PARA_BASE o robô mantém a bandeira presa e elevada e planeja por A estrela uma rota até a sua base, contornando os obstáculos pela grade de ocupação construída com o LIDAR. A referência da base é a posição inicial do robô, gravada no começo da missão, já que o robô sempre nasce sobre o centro da base. Uma detecção de travamento com manobra de escape continua ativa durante o transporte.
+
+No estado POSICIONANDO_PARA_DEPOSITO o robô faz o ajuste fino sobre o ponto de depósito, que é a posição inicial dentro do círculo amarelo. Ele gira para o ponto e avança até ficar bem dentro da tolerância, e então deposita.
+
+No estado DEPOSITANDO_BANDEIRA o robô abaixa a haste e abre os braços para soltar a bandeira no círculo amarelo e em seguida recua um pouco, para não reencostar nela nem derrubá-la. Depois disso a missão é concluída.
 
 No estado REDETECTANDO_BANDEIRA o robô trata a perda da bandeira do campo de visão. Ele gira no lugar, no sentido em que a bandeira foi vista por último, para reencontrá-la. Caso não a reencontre dentro de um tempo limite, volta a explorar.
 
-No estado MISSAO_CONCLUIDA o robô para, tendo alcançado e se posicionado diante da bandeira adversária. Um breve movimento de comemoração é executado nos primeiros segundos.
+No estado MISSAO_CONCLUIDA o robô para, tendo capturado a bandeira adversária, retornado à base e depositado a bandeira no círculo amarelo. Um breve movimento de comemoração é executado nos primeiros segundos.
 
 A robustez do sistema aparece principalmente em dois pontos. O primeiro é o tratamento da perda da bandeira, que leva o robô a girar e reencontrá-la em vez de prosseguir às cegas. O segundo é a prioridade do desvio de obstáculos sobre a perseguição da bandeira, além de uma detecção de travamento que dispara uma manobra de escape quando o robô deixa de progredir.
+
+## Manipulador e captura da bandeira
+
+A garra usada é a do robô base do professor, composta por uma haste de sustentação que sobe e desce por uma junta revolucional e por dois braços laterais acionados por juntas prismáticas, que abrem e fecham deslizando para os lados. O controle é feito publicando no tópico do controlador da garra um vetor de três valores na ordem definida pelo professor, elevação da haste, abertura do braço direito e abertura do braço esquerdo. A máquina de estados publica essas poses diretamente, nas etapas da captura e do depósito.
+
+A captura é feita por atrito. Quando o robô está em posição de pega, a haste desce até a altura do mastro, os braços abrem, o robô avança o pouco que falta para o mastro entrar entre os braços, os braços fecham prendendo o mastro e a haste sobe levando a bandeira. Para que isso seja possível, as colisões dos braços e das pontas da garra, que tinham sido removidas no Trabalho 1 para estabilizar o robô, foram restauradas, já que são essas superfícies que prendem o mastro. O lastro baixo introduzido no Trabalho 1 mantém o robô estável mesmo com as colisões da garra de volta.
+
+Os ângulos das poses, os tempos de cada etapa e a velocidade de avanço da captura ficam em parâmetros, no arquivo de configuração da missão, e podem ser ajustados sem recompilar para afinar a pega conforme o cenário.
 
 ## Detecção visual da bandeira
 
 A câmera do robô é do tipo segmentação semântica, definida na descrição do robô. O simulador atribui a cada objeto da cena uma etiqueta numérica e publica um mapa de etiquetas no qual o valor de cada pixel corresponde à etiqueta do objeto naquele ponto. No mundo padrão, a bandeira adversária, que é a azul, recebe a etiqueta de número vinte e cinco, enquanto a bandeira do próprio time, a vermelha, recebe a etiqueta vinte. O robô nasce no lado vermelho, portanto a bandeira a ser capturada é a azul.
 
-O nó de percepção lê o mapa de etiquetas, isola os pixels cujo valor corresponde à etiqueta da bandeira adversária, encontra o maior agrupamento desses pixels e calcula o centro e a área desse agrupamento. A partir do centro obtém o deslocamento horizontal normalizado da bandeira na imagem e a partir da área obtém uma medida de proximidade. Essa abordagem por etiqueta é mais robusta do que casar uma cor exata, porque não depende de calibrar valores de cor. Ainda assim, o nó oferece um modo alternativo de detecção por cor, para quem preferir trabalhar com o mapa colorido da segmentação.
+O nó de percepção lê o mapa de etiquetas, isola os pixels cujo valor corresponde à etiqueta da bandeira adversária, encontra o maior agrupamento desses pixels e calcula o centro e a área desse agrupamento. A partir do centro obtém o deslocamento horizontal normalizado da bandeira na imagem e a partir da área obtém uma medida de proximidade. A detecção por etiqueta é o método padrão porque distingue a bandeira azul da base azul, que tem a mesma cor. Uma detecção apenas por cor confundiria a bandeira com a base e com o piso azul do lado adversário, fazendo o robô declarar chegada longe da bandeira. Mesmo assim, o nó oferece um modo alternativo de detecção por cor, que usa uma câmera RGB comum e uma faixa de cor em torno do azul da bandeira, útil em cenários onde a bandeira tenha uma cor distinta da base. O enunciado do Trabalho 2 fornece a máscara de cor da bandeira azul para esse modo.
 
 ## Mapa de ocupação e planejamento por A estrela
 
@@ -173,7 +199,9 @@ O pacote segue a estrutura de um pacote Python do ROS 2. O arquivo package.xml d
 
 ## Estado atual e limitações conhecidas
 
-O robô não tomba mais ao encostar em obstáculos e a missão completa, da exploração ao posicionamento, funciona partindo da base no lado vermelho. Com o mapa de ocupação construído em tempo real e o planejamento por A estrela, o robô atravessa de forma estável o aglomerado denso de cilindros que fica logo à frente da base, problema que a navegação puramente reativa não resolvia de maneira confiável. A principal limitação atual é o tempo de travessia, que pode ser longo em máquinas sem aceleração de vídeo, onde a simulação roda abaixo do tempo real. Os ganhos de exploração, de desvio e de planejamento continuam sendo bons candidatos a ajuste automático na fase de computação evolutiva, com o objetivo de obter um comportamento ainda mais rápido e robusto.
+O robô não tomba ao encostar em obstáculos e a missão funciona partindo da base no lado vermelho. Com o mapa de ocupação construído em tempo real e o planejamento por A estrela, o robô atravessa de forma estável o aglomerado denso de cilindros, problema que a navegação puramente reativa não resolvia de maneira confiável. A máquina de estados percorre toda a sequência do Trabalho 2, exploração, detecção, navegação, posicionamento, captura, retorno à base e depósito, e a sequência de comandos da garra na captura segue a ordem do controlador do professor.
+
+A captura por atrito depende do alinhamento entre a garra e o mastro, então os ângulos da haste e os tempos de cada etapa precisam de ajuste fino conforme o cenário, e esses valores estão expostos como parâmetros para facilitar essa calibração. A principal limitação prática é o tempo de execução em máquinas sem aceleração de vídeo, onde a simulação roda bem abaixo do tempo real. Os ganhos de exploração, de desvio, de planejamento e de captura continuam sendo bons candidatos a ajuste automático na fase de computação evolutiva, com o objetivo de obter um comportamento ainda mais rápido e robusto.
 
 ## Documentação da feira
 
