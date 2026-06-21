@@ -620,15 +620,13 @@ class MissionControl(Node):
         # Obstaculo ENTRE o robo e a bandeira: se ha algo perto a frente mas a
         # bandeira ainda esta pequena na imagem, NAO e a bandeira (se fosse, a
         # area seria grande a essa distancia), e sim um cilindro no caminho.
-        # Volta a NAVEGAR para o A estrela contornar, em vez de ir contra ele.
+        # Contorna por A estrela na direcao da bandeira, sem sair do estado, em
+        # vez de avancar reto contra ele. Como grasp_clear_distance fica abaixo
+        # da distancia em que a bandeira ja seria "ready_to_grab", o proprio
+        # mastro nunca cai aqui (ja teria disparado a captura acima).
         if not ready_to_grab and front < self.p.grasp_clear_distance:
-            self.get_logger().info(
-                'Obstaculo entre o robo e a bandeira no posicionamento '
-                f'(frontal={front:.2f} m, area={self.flag_area:.3f}). '
-                'Voltando a navegar para contornar.',
-                throttle_duration_sec=2.0)
-            self.transition_to(State.NAVEGANDO_PARA_BANDEIRA)
-            return Twist()
+            flag_dir = self.yaw - aim_offset * (CAMERA_H_FOV / 2.0)
+            return self._plan_follow_twist(flag_dir)
 
         # Perseguicao suave: gira proporcional ao deslocamento (ja corrigido para
         # o mastro) E avanca ao mesmo tempo, reduzindo a velocidade quanto mais

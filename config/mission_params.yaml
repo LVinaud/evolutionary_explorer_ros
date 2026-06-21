@@ -62,7 +62,7 @@ mission_control:
     grip_carry_elev: -0.4         # haste ao transportar
     grasp_aim_bias: 0.12          # vies lateral p/ mirar no mastro (nao no painel)
     grasp_area_ratio: 0.05        # area p/ iniciar a captura (bem perto)
-    grasp_clear_distance: 0.7     # m: algo mais perto que isto com bandeira pequena = obstaculo
+    grasp_clear_distance: 0.5     # m: abaixo da dist. de captura; algo mais perto com bandeira pequena = obstaculo
     capture_settle_time: 1.5      # s p/ abaixar e abrir
     capture_creep_time: 3.5       # s avancando p/ enfiar o mastro
     capture_creep_speed: 0.08     # m/s no avanco de captura

@@ -120,7 +120,7 @@ class MissionParams:
     # imagem (area < grasp_area_ratio), o que esta a frente NAO e a bandeira e
     # sim um obstaculo (um cilindro entre o robo e a bandeira). Serve para o
     # posicionamento voltar a navegar e contornar, em vez de avancar contra ele.
-    grasp_clear_distance: float = 0.7
+    grasp_clear_distance: float = 0.5
     # Sequencia temporizada da captura (segundos de cada etapa).
     capture_settle_time: float = 1.5   # haste desce e bracos abrem
     capture_creep_time: float = 3.5    # avanca devagar enfiando o mastro
