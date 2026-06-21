@@ -608,16 +608,26 @@ class MissionControl(Node):
         centered = abs(aim_offset) < self.p.centering_tolerance
         ready_to_grab = self.flag_area >= self.p.grasp_area_ratio
         front = self.front_distance()
-        # Nao consegue mais avancar (algo, tipicamente a propria bandeira, esta
-        # na distancia critica): tambem serve de gatilho para nao travar aqui.
-        cant_advance = front <= self.p.emergency_stop_distance
 
-        if centered and (ready_to_grab or cant_advance):
+        if centered and ready_to_grab:
             self.get_logger().info(
                 f'Em posicao de pega! area={self.flag_area:.3f}, '
                 f'offset={self.flag_offset:+.3f} (mira={aim_offset:+.3f}), '
                 f'dist_frontal={front:.2f} m. Iniciando captura.')
             self.transition_to(State.CAPTURANDO_BANDEIRA)
+            return Twist()
+
+        # Obstaculo ENTRE o robo e a bandeira: se ha algo perto a frente mas a
+        # bandeira ainda esta pequena na imagem, NAO e a bandeira (se fosse, a
+        # area seria grande a essa distancia), e sim um cilindro no caminho.
+        # Volta a NAVEGAR para o A estrela contornar, em vez de ir contra ele.
+        if not ready_to_grab and front < self.p.grasp_clear_distance:
+            self.get_logger().info(
+                'Obstaculo entre o robo e a bandeira no posicionamento '
+                f'(frontal={front:.2f} m, area={self.flag_area:.3f}). '
+                'Voltando a navegar para contornar.',
+                throttle_duration_sec=2.0)
+            self.transition_to(State.NAVEGANDO_PARA_BANDEIRA)
             return Twist()
 
         # Perseguicao suave: gira proporcional ao deslocamento (ja corrigido para

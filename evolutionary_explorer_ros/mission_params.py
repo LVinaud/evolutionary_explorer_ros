@@ -86,7 +86,7 @@ class MissionParams:
     # quando a bandeira esta centralizada; a area (approach_area_ratio) e um
     # gatilho secundario (caso o mastro fino escape do LIDAR).
     approach_distance: float = 1.3        # m: dist. frontal p/ NAV->POSICIONANDO
-    approach_area_ratio: float = 0.015    # area (gatilho secundario NAV->POSICIONANDO)
+    approach_area_ratio: float = 0.03     # area p/ NAV->POSICIONANDO (entra mais perto)
     # Conclusao do posicionamento: a bandeira "grande o suficiente" na imagem
     # indica proximidade (sinal visual robusto, ao contrario do mastro fino no
     # LIDAR). O LIDAR (emergency_stop_distance) entra apenas como seguranca.
@@ -116,6 +116,11 @@ class MissionParams:
     grasp_aim_bias: float = 0.12
     # Area da bandeira na imagem para iniciar a captura (bandeira BEM perto).
     grasp_area_ratio: float = 0.05
+    # Distancia frontal abaixo da qual, se a bandeira ainda esta pequena na
+    # imagem (area < grasp_area_ratio), o que esta a frente NAO e a bandeira e
+    # sim um obstaculo (um cilindro entre o robo e a bandeira). Serve para o
+    # posicionamento voltar a navegar e contornar, em vez de avancar contra ele.
+    grasp_clear_distance: float = 0.7
     # Sequencia temporizada da captura (segundos de cada etapa).
     capture_settle_time: float = 1.5   # haste desce e bracos abrem
     capture_creep_time: float = 3.5    # avanca devagar enfiando o mastro
