@@ -10,6 +10,10 @@ O pacote deriva do pacote base da disciplina, disponível em github.com/matheusb
 
 O nome do pacote contém a palavra evolutionary porque o projeto tem uma segunda fase planejada, na qual os parâmetros de comportamento do robô serão ajustados por computação evolutiva. A arquitetura já foi preparada para isso, mantendo toda a lógica de decisão separada dos valores numéricos de comportamento. Esses valores ficam reunidos em um único arquivo de parâmetros e em uma classe de dados dedicada, de modo que evoluir o comportamento significa apenas trocar valores, sem alterar a máquina de estados.
 
+## Video do Robô Completando a Missão
+
+https://github.com/user-attachments/assets/83986c80-54db-489f-962d-76b2f9868699
+
 ## Branches do repositório
 
 Este repositório tem as duas entregas em branches diferentes. A branch main contém o Trabalho 1, no qual o robô explora a arena, localiza a bandeira inimiga e se posiciona diante dela. A branch trabalho-2 contém o Trabalho 2, que acrescenta a captura da bandeira com a garra, o transporte de volta e o depósito na base. Este README é o da branch trabalho-2, ou seja, descreve a missão completa do Trabalho 2. Os passos de instalação e de compilação são iguais nas duas branches, mudando apenas o nome da branch no momento de clonar e o que a missão faz ao final.
