@@ -12,11 +12,90 @@ O nome do pacote contém a palavra evolutionary porque o projeto tem uma segunda
 
 https://github.com/user-attachments/assets/83986c80-54db-489f-962d-76b2f9868699
 
+## Branches do repositório
+
+Este repositório tem as duas entregas em branches diferentes. A branch main contém o Trabalho 1, no qual o robô explora a arena, localiza a bandeira inimiga e se posiciona diante dela. A branch trabalho-2 contém o Trabalho 2, que acrescenta a captura da bandeira com a garra, o transporte de volta e o depósito na base. Este README é o da branch main, ou seja, descreve o Trabalho 1. Os passos de instalação e de compilação são iguais nas duas branches, mudando apenas o nome da branch no momento de clonar e o que a missão faz ao final.
+
 ## Requisitos
 
 O sistema foi feito para Ubuntu 22.04 com ROS 2 Humble e Gazebo Fortress na variante Ignition. As dependências principais são a biblioteca cliente rclpy, os pacotes de mensagens padrão do ROS, a ponte ros_gz_bridge, o ros_gz_sim, o ign_ros2_control, o ros2_control e os ros2_controllers, o robot_state_publisher, o xacro, o rviz2, o topic_tools, a biblioteca OpenCV com o cv_bridge, além de numpy e scipy. Todas as dependências estão declaradas no arquivo package.xml.
 
 Caso o ROS 2 e o Gazebo ainda não estejam instalados na máquina, o repositório inclui um script auxiliar em scripts/install_ros_humble.sh que configura o repositório de pacotes do ROS e instala tudo o que é necessário.
+
+## Instalação do zero em Ubuntu 22.04
+
+Esta seção descreve a instalação completa em uma máquina Ubuntu 22.04 sem nada instalado, do sistema até o projeto rodando. Importante, não execute estes passos com um ambiente Conda ativo, porque o Conda coloca as bibliotecas dele de Qt e OpenGL na frente das do sistema e isso impede a interface do Gazebo de subir. Se o início do terminal mostrar a marca de ambiente base, rode conda deactivate antes, ou não use Conda nesta máquina.
+
+Passo 1, ferramentas básicas e locale.
+
+```
+sudo apt update
+sudo apt install -y git curl gnupg lsb-release software-properties-common locales
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+```
+
+Passo 2, habilitar o repositório universe.
+
+```
+sudo add-apt-repository -y universe
+```
+
+Passo 3, adicionar a chave e o repositório de pacotes do ROS 2.
+
+```
+sudo mkdir -p /usr/share/keyrings
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+sudo apt update
+```
+
+Passo 4, instalar o ROS 2 Humble, o Gazebo Fortress e as dependências. O pacote ros-humble-ros-gz já traz o Gazebo Fortress junto.
+
+```
+sudo apt install -y \
+  ros-humble-desktop ros-dev-tools python3-colcon-common-extensions python3-rosdep \
+  ros-humble-ros-gz ros-humble-ign-ros2-control ros-humble-ros2-control ros-humble-ros2-controllers \
+  ros-humble-robot-state-publisher ros-humble-joint-state-publisher ros-humble-joint-state-publisher-gui \
+  ros-humble-xacro ros-humble-cv-bridge ros-humble-image-transport ros-humble-topic-tools ros-humble-teleop-twist-keyboard \
+  python3-opencv python3-scipy python3-numpy
+```
+
+Passo 5, inicializar o rosdep.
+
+```
+sudo rosdep init
+rosdep update
+```
+
+Passo 6, criar o workspace e clonar este projeto. O clone abaixo, sem indicar branch, traz a branch main, que é o Trabalho 1. Para o Trabalho 2, troque o comando de clone por git clone -b trabalho-2 com a mesma URL.
+
+```
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+git clone https://github.com/LVinaud/evolutionary_explorer_ros.git
+```
+
+Passo 7, resolver as dependências do pacote e compilar.
+
+```
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Como atalho dos passos 1 a 5, depois de clonar o repositório no passo 6 você pode rodar o script que acompanha o pacote, que faz a mesma instalação do ROS, do Gazebo e das dependências, e então seguir do passo 7 em diante.
+
+```
+cd ~/ros2_ws/src/evolutionary_explorer_ros
+chmod +x scripts/install_ros_humble.sh
+ROS_PROFILE=desktop ./scripts/install_ros_humble.sh
+```
+
+Depois de compilar, siga para a seção de execução. Em máquina nativa com GPU não é preciso o argumento software_render, porque o padrão já usa a placa de vídeo. O software_render só é necessário em máquina virtual sem aceleração 3D.
 
 ## Instalação das dependências
 
