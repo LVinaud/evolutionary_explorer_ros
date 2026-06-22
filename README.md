@@ -8,6 +8,10 @@ O pacote deriva do pacote base da disciplina, disponível em github.com/matheusb
 
 O nome do pacote contém a palavra evolutionary porque o projeto tem uma segunda fase planejada, na qual os parâmetros de comportamento do robô serão ajustados por computação evolutiva. A arquitetura já foi preparada para isso, mantendo toda a lógica de decisão separada dos valores numéricos de comportamento. Esses valores ficam reunidos em um único arquivo de parâmetros e em uma classe de dados dedicada, de modo que evoluir o comportamento significa apenas trocar valores, sem alterar a máquina de estados.
 
+## Video do Robô Completando a Missão
+
+https://github.com/user-attachments/assets/83986c80-54db-489f-962d-76b2f9868699
+
 ## Requisitos
 
 O sistema foi feito para Ubuntu 22.04 com ROS 2 Humble e Gazebo Fortress na variante Ignition. As dependências principais são a biblioteca cliente rclpy, os pacotes de mensagens padrão do ROS, a ponte ros_gz_bridge, o ros_gz_sim, o ign_ros2_control, o ros2_control e os ros2_controllers, o robot_state_publisher, o xacro, o rviz2, o topic_tools, a biblioteca OpenCV com o cv_bridge, além de numpy e scipy. Todas as dependências estão declaradas no arquivo package.xml.
