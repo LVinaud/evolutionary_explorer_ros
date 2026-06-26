@@ -145,16 +145,28 @@ class FlagDetector(Node):
             if area >= self.min_blob_area:
                 M = cv2.moments(largest)
                 if M['m00'] != 0.0:
-                    cx = M['m10'] / M['m00']
+                    cx_centroid = M['m10'] / M['m00']
                     cy = M['m01'] / M['m00']
+
+                    # O MASTRO da bandeira (world y=0) e o elemento mais a
+                    # DIREITA do blob quando o robo se aproxima pelo lado
+                    # vermelho (+x). O PAINEL (world y=0.16) se estende para
+                    # a ESQUERDA na imagem, puxando o centroide para longe do
+                    # mastro. Usamos a borda direita do bounding box para
+                    # estimar a posicao do mastro em vez do centroide.
+                    x_bb, _, w_bb, _ = cv2.boundingRect(largest)
+                    cx_pole = float(x_bb + w_bb)  # borda direita = mastro
                     # offset horizontal normalizado: -1 (esq) .. +1 (dir)
-                    offset = (cx - width / 2.0) / (width / 2.0)
+                    offset = (cx_pole - width / 2.0) / (width / 2.0)
                     area_ratio = area / image_area
                     detected = True
 
                     if self.publish_debug:
                         cv2.drawContours(debug_frame, [largest], -1, (0, 255, 0), 2)
-                        cv2.circle(debug_frame, (int(cx), int(cy)), 5, (0, 0, 255), -1)
+                        cv2.circle(debug_frame, (int(cx_centroid), int(cy)), 5,
+                                   (0, 0, 255), -1)   # centroide (vermelho)
+                        cv2.circle(debug_frame, (int(cx_pole), int(cy)), 5,
+                                   (255, 0, 0), -1)   # estimativa do mastro (azul)
 
         # ---- Publica resultados ----
         self.pub_detected.publish(Bool(data=detected))

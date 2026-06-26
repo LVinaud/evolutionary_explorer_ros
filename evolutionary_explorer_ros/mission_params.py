@@ -86,16 +86,16 @@ class MissionParams:
     # quando a bandeira esta centralizada; a area (approach_area_ratio) e um
     # gatilho secundario (caso o mastro fino escape do LIDAR).
     approach_distance: float = 1.3        # m: dist. frontal p/ NAV->POSICIONANDO
-    approach_area_ratio: float = 0.03     # area p/ NAV->POSICIONANDO (entra mais perto)
+    approach_area_ratio: float = 0.02     # area p/ NAV->POSICIONANDO (entra mais longe)
     # Conclusao do posicionamento: a bandeira "grande o suficiente" na imagem
     # indica proximidade (sinal visual robusto, ao contrario do mastro fino no
     # LIDAR). O LIDAR (emergency_stop_distance) entra apenas como seguranca.
     complete_area_ratio: float = 0.03     # area p/ considerar POSICIONADO (perto)
     target_stop_distance: float = 0.6     # m: dist. frontal de referencia/seguranca
-    position_linear_kp: float = 0.6       # ganho da velocidade de aproximacao
+    position_linear_kp: float = 0.40      # ganho da velocidade de aproximacao (lento p/ 50% RT)
     position_angular_kp: float = 2.0      # ganho P de centralizacao fina
-    position_steer_kp: float = 1.2        # ganho de esterco na perseguicao suave
-    centering_tolerance: float = 0.06     # offset normalizado considerado centrado
+    position_steer_kp: float = 1.8        # ganho de esterco na perseguicao suave
+    centering_tolerance: float = 0.10     # offset normalizado considerado centrado (mais tolerante)
 
     # ------------------------------------------------------------------ #
     # Garra e captura da bandeira (Trabalho 2)
@@ -113,20 +113,35 @@ class MissionParams:
     # fica puxado para o lado do painel, entao o robo mira ao lado do mastro.
     # Este vies, somado ao deslocamento medido, corrige a mira para o mastro.
     # Positivo mira mais para a direita; ajustar o sinal/valor olhando a captura.
-    grasp_aim_bias: float = 0.12
+    grasp_aim_bias: float = -0.05
     # Area da bandeira na imagem para iniciar a captura (bandeira BEM perto).
-    grasp_area_ratio: float = 0.05
+    grasp_area_ratio: float = 0.25
     # Distancia frontal abaixo da qual, se a bandeira ainda esta pequena na
     # imagem (area < grasp_area_ratio), o que esta a frente NAO e a bandeira e
     # sim um obstaculo (um cilindro entre o robo e a bandeira). Serve para o
     # posicionamento voltar a navegar e contornar, em vez de avancar contra ele.
-    grasp_clear_distance: float = 0.5
+    # Mantido baixo para nao confundir o proprio mastro fino com obstaculo.
+    grasp_clear_distance: float = 0.28
+    # Gatilhos ROBUSTOS de captura (independentes da area na imagem, que pode
+    # ser ocluida pela propria garra aberta a frente da camera):
+    #   * grasp_front_stop: distancia frontal (LIDAR) em que a bandeira ja esta
+    #     ao alcance do gripper -> para de avancar e captura.
+    #   * grasp_position_timeout: se ficar tempo demais tentando posicionar
+    #     (ja tendo se aproximado da bandeira), captura assim mesmo.
+    grasp_front_stop: float = 0.42       # m: dist. frontal p/ disparar a captura
+    grasp_position_timeout: float = 12.0  # s (sim): timeout duro do posicionamento
+    # Distancia frontal alvo para o mastro ficar SENTADO entre os bracos. Os
+    # bracos agarram em x=[0.35,0.45] do base_link; com o mastro (raio 0.03) o
+    # LIDAR (em x=0) le F => centro do mastro em x=F+0.03. Para sentar o mastro
+    # em x~0.43 (dentro da faixa de agarre), o alvo e F~0.40. O creep para aqui,
+    # em vez de avancar um tempo fixo (que empurrava o mastro alem da garra).
+    grip_seat_distance: float = 0.40
     # Sequencia temporizada da captura (segundos de cada etapa).
-    capture_settle_time: float = 1.5   # haste desce e bracos abrem
-    capture_creep_time: float = 3.5    # avanca devagar enfiando o mastro
-    capture_creep_speed: float = 0.08  # m/s no avanco de captura
-    capture_close_time: float = 1.5    # fecha os bracos no mastro
-    capture_raise_time: float = 1.5    # eleva a haste com a bandeira presa
+    capture_settle_time: float = 2.0   # haste desce e bracos abrem
+    capture_creep_time: float = 1.0    # TETO de tempo do avanco (creep para por LIDAR antes)
+    capture_creep_speed: float = 0.07  # m/s no avanco de captura
+    capture_close_time: float = 2.0    # fecha os bracos no mastro
+    capture_raise_time: float = 2.0    # eleva a haste com a bandeira presa
 
     # ------------------------------------------------------------------ #
     # Retorno a base e deposito (Trabalho 2)

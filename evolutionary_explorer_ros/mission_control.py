@@ -151,6 +151,14 @@ class MissionControl(Node):
         self.detect_streak = 0            # frames consecutivos com deteccao
         self.last_seen_time = None        # instante da ultima deteccao positiva
         self.last_offset_sign = 1.0       # lado onde a bandeira foi vista
+        # Rastreamento do momento em que o robo chegou na distancia de pega.
+        # Permite disparar a captura 2 s apos chegar la, mesmo sem centralizar.
+        self.posicionando_was_ready = False
+        self.posicionando_ready_time = None
+        # Maior area da bandeira ja vista em POSICIONANDO: confirma que o robo
+        # REALMENTE se aproximou da bandeira (e nao parou cedo num cilindro),
+        # liberando os gatilhos de captura por LIDAR e por timeout.
+        self.posicionando_max_area = 0.0
 
         # ---- Estado da maquina ----
         self.state = State.AGUARDANDO_COMANDO
@@ -179,6 +187,10 @@ class MissionControl(Node):
                 f'[FSM] {self.state.value} -> {new_state.value}')
             self.state = new_state
             self.state_since = self.now()
+            if new_state == State.POSICIONANDO_PARA_COLETA:
+                self.posicionando_was_ready = False
+                self.posicionando_ready_time = None
+                self.posicionando_max_area = 0.0
 
     def time_in_state(self) -> float:
         return self.now() - self.state_since
@@ -598,47 +610,73 @@ class MissionControl(Node):
     # perto o suficiente, passa para a CAPTURA.
     # ---------------------------------------------------------------------- #
     def st_posicionando(self) -> Twist:
-        if self.time_since_seen() > self.p.detect_lost_timeout:
-            self.transition_to(State.REDETECTANDO_BANDEIRA)
-            return Twist()
+        # Abre a garra ja durante a abordagem.
+        self.open_gripper(self.p.grip_capture_elev)
 
-        # Mira no MASTRO, nao no centro do blob: o painel desloca o centro do
-        # blob para o seu lado, entao corrigimos com um vies lateral.
         aim_offset = self.flag_offset + self.p.grasp_aim_bias
         centered = abs(aim_offset) < self.p.centering_tolerance
         ready_to_grab = self.flag_area >= self.p.grasp_area_ratio
         front = self.front_distance()
 
-        if centered and ready_to_grab:
+        # Atualiza a maior area ja vista e marca o 1o instante "pronto".
+        self.posicionando_max_area = max(self.posicionando_max_area, self.flag_area)
+        if ready_to_grab and not self.posicionando_was_ready:
+            self.posicionando_was_ready = True
+            self.posicionando_ready_time = self.now()
+
+        # "Realmente perto da bandeira": a bandeira ja ocupou uma fracao
+        # razoavel da imagem em algum momento. Isso distingue estar diante da
+        # bandeira de ter parado cedo num cilindro (cuja label nao e a 25).
+        near_flag = self.posicionando_max_area > 0.10
+
+        # Gatilhos de captura (QUALQUER um basta). Os tres ultimos NAO dependem
+        # da area instantanea (que a garra aberta pode ocluir), evitando o
+        # congelamento em que o robo girava eternamente sem nunca capturar:
+        #  1. Alinhado + perto (visao): condicao ideal.
+        #  2. Area >1.5x o alvo: gripper claramente no ponto.
+        #  3. LIDAR: bandeira ao alcance do gripper (front <= grasp_front_stop),
+        #     ja tendo se aproximado dela (near_flag).
+        #  4. Bandeira sumiu apos estar pronta (camera ocluida de tao perto).
+        #  5. Timeout duro: tempo demais posicionando, ja perto da bandeira.
+        close_enough = self.flag_area > self.p.grasp_area_ratio * 1.5
+        lidar_at_flag = near_flag and front <= self.p.grasp_front_stop
+        lost_after_ready = (self.posicionando_was_ready and
+                            self.time_since_seen() > 1.0)
+        hard_timeout = (near_flag and
+                        self.time_in_state() > self.p.grasp_position_timeout)
+
+        if ((centered and ready_to_grab) or close_enough or lidar_at_flag or
+                lost_after_ready or hard_timeout):
             self.get_logger().info(
-                f'Em posicao de pega! area={self.flag_area:.3f}, '
+                f'Em posicao de pega! area={self.flag_area:.3f} '
+                f'(max={self.posicionando_max_area:.3f}), '
                 f'offset={self.flag_offset:+.3f} (mira={aim_offset:+.3f}), '
                 f'dist_frontal={front:.2f} m. Iniciando captura.')
             self.transition_to(State.CAPTURANDO_BANDEIRA)
             return Twist()
 
-        # Obstaculo ENTRE o robo e a bandeira: se ha algo perto a frente mas a
-        # bandeira ainda esta pequena na imagem, NAO e a bandeira (se fosse, a
-        # area seria grande a essa distancia), e sim um cilindro no caminho.
-        # Contorna por A estrela na direcao da bandeira, sem sair do estado, em
-        # vez de avancar reto contra ele. Como grasp_clear_distance fica abaixo
-        # da distancia em que a bandeira ja seria "ready_to_grab", o proprio
-        # mastro nunca cai aqui (ja teria disparado a captura acima).
-        if not ready_to_grab and front < self.p.grasp_clear_distance:
+        # Perda de visao sem nunca ter chegado perto: vai redetectar.
+        if not near_flag and self.time_since_seen() > self.p.detect_lost_timeout:
+            self.transition_to(State.REDETECTANDO_BANDEIRA)
+            return Twist()
+
+        # Obstaculo ENTRE o robo e a bandeira (cilindro a frente, bandeira
+        # ainda pequena): contorna por A estrela em vez de avancar contra ele.
+        if not near_flag and front < self.p.grasp_clear_distance:
             flag_dir = self.yaw - aim_offset * (CAMERA_H_FOV / 2.0)
             return self._plan_follow_twist(flag_dir)
 
-        # Perseguicao suave: gira proporcional ao deslocamento (ja corrigido para
-        # o mastro) E avanca ao mesmo tempo, reduzindo a velocidade quanto mais
-        # descentralizado (em vez de "gira-entao-anda", que gera o vai-e-vem
-        # pendular). Para o avanco se houver algo na distancia critica.
+        # Perseguicao suave: gira proporcional ao offset + avanca desacelerando.
+        # Para de avancar ao chegar na distancia frontal de pega (grasp_front_stop)
+        # -- a partir dai so o gatilho LIDAR/visao dispara a captura.
         twist = Twist()
         twist.angular.z = nav.clamp(
             -self.p.position_steer_kp * aim_offset,
             -self.p.nav_max_angular_speed, self.p.nav_max_angular_speed)
-        if front > self.p.emergency_stop_distance:
-            slow = max(0.3, 1.0 - abs(aim_offset) / 0.4)
-            speed = self.p.position_linear_kp * slow
+        if front > self.p.grasp_front_stop and front > self.p.emergency_stop_distance:
+            slow_angle = max(0.3, 1.0 - abs(aim_offset) / 0.4)
+            slow_dist = max(0.1, 1.0 - self.flag_area / self.p.grasp_area_ratio)
+            speed = self.p.position_linear_kp * slow_angle * slow_dist
             twist.linear.x = nav.clamp(speed, 0.0, self.p.nav_linear_speed)
         return twist
 
@@ -663,8 +701,12 @@ class MissionControl(Node):
             self.open_gripper(p.grip_capture_elev)
         elif t < t_creep:
             # Avanca devagar para enfiar o mastro entre os bracos abertos.
+            # Para de avancar assim que o LIDAR indica que o mastro ja esta
+            # sentado entre os bracos (front <= grip_seat_distance), evitando
+            # empurrar/derrubar a bandeira quando a captura comeca ja perto.
             self.open_gripper(p.grip_capture_elev)
-            twist.linear.x = p.capture_creep_speed
+            if self.front_distance() > p.grip_seat_distance:
+                twist.linear.x = p.capture_creep_speed
         elif t < t_close:
             # Fecha os bracos, prendendo o mastro por atrito.
             self.close_gripper(p.grip_capture_elev)
